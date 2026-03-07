@@ -1,0 +1,5 @@
+use "./math" as math
+use "time" as time
+
+say("2 + 3 =", math.add(2, 3))
+say("now_ms =", time.now_ms())

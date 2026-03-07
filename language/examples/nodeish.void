@@ -1,0 +1,24 @@
+use "process" as process
+use "path" as path
+use "fs" as fs
+use "cmd" as cmd
+
+say("platform:", process.platform(), "arch:", process.arch())
+say("argc:", process.argc(), "args:", process.args())
+
+let cwd = process.cwd()
+let readme = path.join(cwd, "README.md")
+
+if fs.exists(readme) {
+  say("README found:", readme)
+} else {
+  say("README missing")
+}
+
+let i = 0
+while i < 3 {
+  say("loop", i)
+  i = i + 1
+}
+
+say("shell output:", cmd.run("echo hello-from-void"))

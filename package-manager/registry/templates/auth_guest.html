@@ -1,0 +1,23 @@
+<h2>Create Account</h2>
+<form method="post" action="/register">
+  <label>Username</label>
+  <input name="username" placeholder="dev_name" required>
+
+  <label>Password</label>
+  <input type="password" name="password" placeholder="min 8 characters" required>
+
+  <button class="btn btn-primary" type="submit">Register</button>
+</form>
+
+<h2 style="margin-top:18px">Login</h2>
+<form method="post" action="/login">
+  <label>Username</label>
+  <input name="username" required>
+
+  <label>Password</label>
+  <input type="password" name="password" required>
+
+  <button class="btn btn-ghost" type="submit">Login</button>
+</form>
+
+<p class="muted">You can still browse and install packages without an account.</p>

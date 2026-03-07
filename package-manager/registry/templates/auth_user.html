@@ -1,0 +1,34 @@
+<h2>Publish Package</h2>
+<div class="session-row">
+  <div class="pill">Logged in as <strong>{{USERNAME}}</strong></div>
+  <form method="post" action="/logout">
+    <button class="btn btn-ghost" type="submit">Logout</button>
+  </form>
+</div>
+
+<form method="post" action="/publish" enctype="multipart/form-data">
+  <label>Package Name</label>
+  <input name="name" placeholder="cool_math" required>
+
+  <label>Version</label>
+  <input name="version" placeholder="1.0.0" required>
+
+  <label>Description</label>
+  <input name="description" placeholder="Fast utilities for Void">
+
+  <label>GitHub Repo URL</label>
+  <input name="github_repo" placeholder="https://github.com/owner/repo">
+
+  <label>Tarball URL (optional)</label>
+  <input name="tarball_url" placeholder="https://example.com/pkg.tgz">
+
+  <label>Upload Package File (.tgz/.zip)</label>
+  <input type="file" name="package_file">
+
+  <label>README</label>
+  <textarea name="readme" placeholder="Package docs"></textarea>
+
+  <button class="btn btn-primary" type="submit">Publish</button>
+</form>
+
+<p class="muted">Publishing requires login. Install/search APIs stay public.</p>

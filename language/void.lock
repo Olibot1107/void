@@ -1,0 +1,28 @@
+{
+  "packages": {
+    "discord_js": {
+      "version": "14.25.1",
+      "registry": "https://registry.npmjs.org",
+      "tarball_url": "https://registry.npmjs.org/discord.js/-/discord.js-14.25.1.tgz",
+      "github_repo": "git+https://github.com/discordjs/discord.js.git"
+    },
+    "discord_builders": {
+      "version": "1.13.1",
+      "registry": "https://registry.npmjs.org",
+      "tarball_url": "https://registry.npmjs.org/@discordjs/builders/-/builders-1.13.1.tgz",
+      "github_repo": "git+https://github.com/discordjs/discord.js.git"
+    },
+    "is_number2": {
+      "version": "7.0.0",
+      "registry": "https://registry.npmjs.org",
+      "tarball_url": "https://registry.npmjs.org/is-number/-/is-number-7.0.0.tgz",
+      "github_repo": "git+https://github.com/jonschlinkert/is-number.git"
+    },
+    "npm_is_number": {
+      "version": "7.0.0",
+      "registry": "https://registry.npmjs.org",
+      "tarball_url": "https://registry.npmjs.org/is-number/-/is-number-7.0.0.tgz",
+      "github_repo": "git+https://github.com/jonschlinkert/is-number.git"
+    }
+  }
+}

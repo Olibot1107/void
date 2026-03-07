@@ -1,0 +1,6 @@
+name = "discord_builders"
+version = "1.13.1"
+description = "npm import: @discordjs/builders - A set of builders that you can use when creating your bot"
+author = "npm"
+tarball_url = "https://registry.npmjs.org/@discordjs/builders/-/builders-1.13.1.tgz"
+github_repo = "git+https://github.com/discordjs/discord.js.git"

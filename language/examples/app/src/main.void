@@ -1,0 +1,9 @@
+use "process" as process
+use "json" as json
+
+console.log("Void app entry from manifest")
+console.log("cwd:", process.cwd())
+
+let payload = json.parse('{"name":"void","speed":"fast"}')
+console.log("name:", payload.name)
+console.log("json:", json.stringify(payload))

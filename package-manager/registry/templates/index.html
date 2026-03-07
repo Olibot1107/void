@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Void Registry</title>
+  <style>
+    :root {
+      --bg: #f2f8f5;
+      --ink: #0e1d21;
+      --ink-soft: #4a5f66;
+      --brand: #0f766e;
+      --brand-2: #f97316;
+      --line: #d2e5de;
+      --card: #ffffff;
+      --ok: #e8faf2;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
+      background:
+        radial-gradient(circle at 12% 0%, #d0efe9 0, #f2f8f5 38%),
+        linear-gradient(180deg, #f2f8f5, #ecf6f2);
+      min-height: 100vh;
+    }
+    .shell {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 28px 16px 44px;
+    }
+    .top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .brand {
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: 0.4px;
+    }
+    .sub {
+      color: var(--ink-soft);
+      font-size: 14px;
+      margin-top: 4px;
+    }
+    .badge {
+      border-radius: 999px;
+      border: 1px solid #0f766e3e;
+      background: #0f766e16;
+      color: #0f766e;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px 10px;
+    }
+    .notice {
+      border: 1px solid #b8e8d7;
+      background: var(--ok);
+      border-radius: 10px;
+      padding: 11px 12px;
+      margin-bottom: 12px;
+      font-size: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 16px;
+    }
+    @media (max-width: 920px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow: 0 10px 30px rgba(15, 118, 110, 0.08);
+    }
+    h2 {
+      margin: 0 0 10px;
+      font-size: 19px;
+    }
+    .session-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .pill {
+      background: #f0faf7;
+      border: 1px solid #cae9de;
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 14px;
+    }
+    label {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--ink-soft);
+      font-weight: 700;
+    }
+    input, textarea {
+      width: 100%;
+      margin-bottom: 10px;
+      border: 1px solid #c9d8d3;
+      background: #fcfdfc;
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: var(--ink);
+      font: inherit;
+    }
+    textarea {
+      min-height: 128px;
+      resize: vertical;
+    }
+    .btn {
+      border-radius: 10px;
+      border: none;
+      padding: 10px 14px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--brand), #0e9588);
+      color: #fff;
+    }
+    .btn-ghost {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+    }
+    .search-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .search-row input {
+      flex: 1;
+      min-width: 180px;
+      margin-bottom: 0;
+    }
+    .pkg {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fbfdfc;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+    }
+    .pkg-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: baseline;
+      margin-bottom: 6px;
+    }
+    .pkg code {
+      background: #eaf2ef;
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-size: 12px;
+    }
+    .muted {
+      color: var(--ink-soft);
+      font-size: 14px;
+    }
+    .footer-note {
+      margin-top: 12px;
+      color: var(--ink-soft);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="top">
+      <div>
+        <div class="brand">Void Registry</div>
+        <div class="sub">Publish from GitHub URLs or uploaded package files.</div>
+      </div>
+      <div class="badge">account-gated publishing</div>
+    </header>
+
+    {{MESSAGE_BANNER}}
+
+    <section class="grid">
+      <article class="card">
+        {{AUTH_SECTION}}
+      </article>
+
+      <article class="card">
+        <h2>Package Feed</h2>
+        <form method="get" action="/">
+          <label>Search packages</label>
+          <div class="search-row">
+            <input name="q" placeholder="name, description, author" value="{{SEARCH_VALUE}}">
+            <button class="btn btn-primary" type="submit">Search</button>
+          </div>
+        </form>
+
+        {{PACKAGE_CARDS}}
+
+        <div class="footer-note">
+          Public endpoints for install/search: <code>/api/search</code> and <code>/api/packages</code>
+        </div>
+      </article>
+    </section>
+  </div>
+</body>
+</html>

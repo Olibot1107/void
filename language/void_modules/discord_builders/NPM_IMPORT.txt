@@ -1,0 +1,7 @@
+This package was converted from npm.
+
+npm: @discordjs/builders@1.13.1
+entry: ./dist/index.js
+
+Use in Void:
+  use "discord_builders" as pkg

@@ -1,0 +1,10 @@
+{
+  "author": "npm",
+  "description": "A set of builders that you can use when creating your bot",
+  "github_repo": "git+https://github.com/discordjs/discord.js.git",
+  "main": "index.void",
+  "name": "discord_builders",
+  "npm_name": "@discordjs/builders",
+  "tarball_url": "https://registry.npmjs.org/@discordjs/builders/-/builders-1.13.1.tgz",
+  "version": "1.13.1"
+}

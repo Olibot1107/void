@@ -1,0 +1,9 @@
+use "void" as v
+
+console.log("Void-native runtime demo")
+console.log("cpu_count:", v.cpu_count())
+console.log("uptime_ms:", v.uptime_ms())
+
+repeat 3 {
+  console.log("task id:", v.id("task"), "rand:", v.rand(10, 99))
+}

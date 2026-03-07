@@ -1,0 +1,9 @@
+use "std:time" as core_time
+
+module.exports.now_ms = fn () {
+  return core_time.now_ms()
+}
+
+module.exports.sleep_ms = fn (ms) {
+  return core_time.sleep_ms(ms)
+}
