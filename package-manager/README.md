@@ -47,7 +47,15 @@ Running `vpm` with no arguments now opens install-focused help (`install` mode b
 If you use the repo launcher directly, keep it pointed at
 `/Users/olie/Desktop/void/package-manager/bin/vpm` so it can find the project root.
 
-Login and get a token for CLI publish:
+Login from CLI (token is saved for that registry):
+
+```bash
+/Users/olie/Desktop/void/package-manager/bin/vpm login your_user your_password \
+  --registry http://127.0.0.1:4090
+/Users/olie/Desktop/void/package-manager/bin/vpm whoami --registry http://127.0.0.1:4090
+```
+
+Manual token fetch still works:
 
 ```bash
 TOKEN=$(curl -sS -X POST http://127.0.0.1:4090/api/login \
@@ -60,8 +68,7 @@ Publish JSON payload (manifest fields):
 
 ```bash
 /Users/olie/Desktop/void/package-manager/bin/vpm publish \
-  --registry http://127.0.0.1:4090 \
-  --token "$TOKEN"
+  --registry http://127.0.0.1:4090
 ```
 
 Publish with file upload:
@@ -69,7 +76,6 @@ Publish with file upload:
 ```bash
 /Users/olie/Desktop/void/package-manager/bin/vpm publish \
   --registry http://127.0.0.1:4090 \
-  --token "$TOKEN" \
   --file ./my-package.tgz
 ```
 
@@ -78,8 +84,13 @@ Override GitHub repo at publish time:
 ```bash
 /Users/olie/Desktop/void/package-manager/bin/vpm publish \
   --registry http://127.0.0.1:4090 \
-  --token "$TOKEN" \
   --github https://github.com/owner/repo
+```
+
+Logout:
+
+```bash
+/Users/olie/Desktop/void/package-manager/bin/vpm logout --registry http://127.0.0.1:4090
 ```
 
 Install and search stay public:
@@ -87,6 +98,11 @@ Install and search stay public:
 ```bash
 /Users/olie/Desktop/void/package-manager/bin/vpm search util --registry http://127.0.0.1:4090
 /Users/olie/Desktop/void/package-manager/bin/vpm install some_pkg --registry http://127.0.0.1:4090
+/Users/olie/Desktop/void/package-manager/bin/vpm install some_pkg --version 1.2.3 --registry http://127.0.0.1:4090
+/Users/olie/Desktop/void/package-manager/bin/vpm info some_pkg --registry http://127.0.0.1:4090
+/Users/olie/Desktop/void/package-manager/bin/vpm info some_pkg --version 1.2.3 --readme --registry http://127.0.0.1:4090
+/Users/olie/Desktop/void/package-manager/bin/vpm list
+/Users/olie/Desktop/void/package-manager/bin/vpm remove some_pkg
 ```
 
 Convert npm package -> Void/VPM-ready package:
@@ -118,6 +134,8 @@ This command:
 ## API
 
 - `GET /`: registry website
+- `GET /packages/:name`: package detail page (README + version history + install commands)
+- `GET /packages/:name/:version`: package detail page for a specific version
 - `GET /uploads/:file`: uploaded package files
 - `POST /register`: create account
 - `POST /login`: login (session cookie)
@@ -128,6 +146,7 @@ This command:
 - `POST /api/publish/npm-import`: guest npm-import JSON publish (no auth; restricted to npm-derived package names)
 - `POST /api/publish/upload`: authenticated multipart publish (file upload)
 - `GET /api/packages`: list latest versions
+- `GET /api/packages/:name/:version`: fetch one package version (used for exact-version install)
 - `GET /api/packages/:name`: list all versions of package
 - `GET /api/search?q=...`: search packages
 
@@ -135,6 +154,7 @@ This command:
 
 - `VOID_BUILD_PROFILE`: launcher build profile for `bin/void-registry` and `bin/vpm` (`dev` default, set to `release` for optimized builds)
 - `VPM_TOKEN`: optional default API token used by `vpm npm-import --install` when `--token` is omitted
+- `VPM_AUTH_FILE`: optional path for saved CLI login sessions (default `$HOME/.vpm/auth.json`)
 - `VPM_CACHE_DIR`: base cache directory for npm imports (default `$XDG_CACHE_HOME/vpm` or `$HOME/.cache/vpm`)
 - `VOID_REGISTRY_ADDR`: bind address (default `127.0.0.1:4090`)
 - `VOID_REGISTRY_PUBLIC_URL`: base URL used for uploaded file links (default derived from addr)

@@ -37,10 +37,37 @@ enum Commands {
         #[arg(long)]
         file: Option<PathBuf>,
     },
+    Login {
+        username: String,
+        password: String,
+        #[arg(long, default_value = DEFAULT_REGISTRY)]
+        registry: String,
+    },
+    Logout {
+        #[arg(long, default_value = DEFAULT_REGISTRY)]
+        registry: String,
+    },
+    Whoami {
+        #[arg(long, default_value = DEFAULT_REGISTRY)]
+        registry: String,
+    },
     Search {
         query: String,
         #[arg(long, default_value = DEFAULT_REGISTRY)]
         registry: String,
+    },
+    Info {
+        name: String,
+        #[arg(long)]
+        version: Option<String>,
+        #[arg(long, default_value = DEFAULT_REGISTRY)]
+        registry: String,
+        #[arg(long)]
+        readme: bool,
+    },
+    List,
+    Remove {
+        name: String,
     },
     Install {
         name: Option<String>,
@@ -90,7 +117,7 @@ struct PublishPayload {
     npm_name: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 struct PackageVersion {
     name: String,
     version: String,
@@ -100,6 +127,8 @@ struct PackageVersion {
     github_repo: String,
     readme: String,
     created_at: String,
+    #[serde(default)]
+    downloads: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -109,12 +138,22 @@ struct PackageSummary {
     description: String,
     author: String,
     created_at: String,
+    #[serde(default)]
+    downloads: i64,
 }
 
 #[derive(Debug, Deserialize)]
 struct ApiMessage {
     ok: bool,
     message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiLoginResponse {
+    ok: bool,
+    message: String,
+    token: Option<String>,
+    username: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Default)]
@@ -128,6 +167,18 @@ struct LockPackage {
     registry: String,
     tarball_url: String,
     github_repo: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Default)]
+struct AuthStore {
+    sessions: HashMap<String, AuthSession>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct AuthSession {
+    token: String,
+    username: String,
+    saved_at: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -156,7 +207,22 @@ fn main() {
             github,
             file,
         }) => cmd_publish(&registry, token.as_deref(), github.as_deref(), file.as_deref()),
+        Some(Commands::Login {
+            username,
+            password,
+            registry,
+        }) => cmd_login(&registry, &username, &password),
+        Some(Commands::Logout { registry }) => cmd_logout(&registry),
+        Some(Commands::Whoami { registry }) => cmd_whoami(&registry),
         Some(Commands::Search { query, registry }) => cmd_search(&registry, &query),
+        Some(Commands::Info {
+            name,
+            version,
+            registry,
+            readme,
+        }) => cmd_info(&registry, &name, version.as_deref(), readme),
+        Some(Commands::List) => cmd_list(),
+        Some(Commands::Remove { name }) => cmd_remove(&name),
         Some(Commands::Install {
             name,
             version,
@@ -213,6 +279,17 @@ fn print_install_help() {
 
     println!("Usage: vpm install <name> [--version <VERSION>] [--registry <URL>]");
     println!("Example: vpm install my_pkg --registry {DEFAULT_REGISTRY}");
+    println!("Other useful commands: vpm info <name>, vpm list, vpm remove <name>");
+    println!("Auth commands: vpm login <username> <password>, vpm logout, vpm whoami");
+}
+
+fn new_http_client() -> Result<Client, String> {
+    Client::builder()
+        .connect_timeout(Duration::from_secs(8))
+        .timeout(Duration::from_secs(45))
+        .user_agent("vpm/0.1")
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))
 }
 
 fn cmd_init(name: Option<String>) -> Result<(), String> {
@@ -239,6 +316,79 @@ fn cmd_init(name: Option<String>) -> Result<(), String> {
     fs::write(&manifest_path, content).map_err(|e| e.to_string())?;
     println!("Created {}", manifest_path.display());
     Ok(())
+}
+
+fn cmd_login(registry: &str, username: &str, password: &str) -> Result<(), String> {
+    if username.trim().is_empty() || password.trim().is_empty() {
+        return Err("Username and password are required".to_string());
+    }
+
+    let client = new_http_client()?;
+    let url = format!("{}/api/login", normalize_registry(registry));
+    let response = client
+        .post(url)
+        .json(&serde_json::json!({
+            "username": username.trim(),
+            "password": password,
+        }))
+        .send()
+        .map_err(|e| format!("Login request failed: {e}"))?;
+
+    let status = response.status();
+    let api: ApiLoginResponse = response
+        .json()
+        .map_err(|e| format!("Could not parse login response: {e}"))?;
+
+    if !status.is_success() || !api.ok {
+        return Err(api.message);
+    }
+
+    let token = api
+        .token
+        .as_deref()
+        .ok_or_else(|| "Login response did not include a token".to_string())?;
+    let confirmed_user = api
+        .username
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(username.trim());
+
+    save_auth_session(registry, confirmed_user, token)?;
+    println!(
+        "Logged in as '{}' for {}",
+        confirmed_user,
+        normalize_registry(registry)
+    );
+    println!("Saved auth at {}", auth_store_path().display());
+    Ok(())
+}
+
+fn cmd_logout(registry: &str) -> Result<(), String> {
+    if remove_auth_session(registry)? {
+        println!("Logged out from {}", normalize_registry(registry));
+    } else {
+        println!("No saved login for {}", normalize_registry(registry));
+    }
+    Ok(())
+}
+
+fn cmd_whoami(registry: &str) -> Result<(), String> {
+    let session = load_auth_session(registry)?;
+    if let Some(session) = session {
+        println!(
+            "Logged in as '{}' for {}",
+            session.username,
+            normalize_registry(registry)
+        );
+        println!("Saved at {}", session.saved_at);
+        return Ok(());
+    }
+
+    Err(format!(
+        "Not logged in for {}. Run: vpm login <username> <password> --registry {}",
+        normalize_registry(registry),
+        normalize_registry(registry)
+    ))
 }
 
 fn cmd_publish(
@@ -269,11 +419,18 @@ fn cmd_publish(
         npm_name: None,
     };
 
-    let client = Client::new();
+    let token_owned = resolve_auth_token(registry, token)?.ok_or_else(|| {
+        format!(
+            "Publishing requires auth. Run: vpm login <username> <password> --registry {} or pass --token",
+            normalize_registry(registry)
+        )
+    })?;
+
+    let client = new_http_client()?;
     let api = if let Some(path) = file {
-        publish_multipart(&client, registry, token, &payload, path)?
+        publish_multipart(&client, registry, Some(token_owned.as_str()), &payload, path)?
     } else {
-        publish_json(&client, registry, token, &payload)?
+        publish_json(&client, registry, Some(token_owned.as_str()), &payload)?
     };
 
     if !api.ok {
@@ -371,7 +528,7 @@ fn publish_multipart(
 }
 
 fn cmd_search(registry: &str, query: &str) -> Result<(), String> {
-    let client = Client::new();
+    let client = new_http_client()?;
     let url = format!("{}/api/search", normalize_registry(registry));
 
     let response = client
@@ -393,9 +550,121 @@ fn cmd_search(registry: &str, query: &str) -> Result<(), String> {
 
     for pkg in packages {
         println!(
-            "{}@{} - {} (author: {})",
-            pkg.name, pkg.version, pkg.description, pkg.author
+            "{}@{} - {} (author: {}, downloads: {})",
+            pkg.name, pkg.version, pkg.description, pkg.author, pkg.downloads
         );
+    }
+
+    Ok(())
+}
+
+fn cmd_info(registry: &str, name: &str, version: Option<&str>, readme: bool) -> Result<(), String> {
+    validate_package_name(name)?;
+
+    let client = new_http_client()?;
+    let versions = fetch_registry_package_versions(&client, registry, name)?;
+    if versions.is_empty() {
+        return Err(format!("Package '{name}' not found"));
+    }
+
+    let selected = if let Some(target_version) = version {
+        versions
+            .iter()
+            .find(|pkg| pkg.version == target_version)
+            .ok_or_else(|| format!("Version '{target_version}' not found for '{name}'"))?
+    } else {
+        versions
+            .first()
+            .ok_or_else(|| format!("Package '{name}' not found"))?
+    };
+
+    println!("{}@{}", selected.name, selected.version);
+    println!("author: {}", selected.author);
+    println!("downloads: {}", selected.downloads);
+    println!("published: {}", selected.created_at);
+    println!("description: {}", selected.description);
+    if !selected.github_repo.trim().is_empty() {
+        println!("source: {}", normalize_repo_clone_url(&selected.github_repo));
+    }
+    if !selected.tarball_url.trim().is_empty() {
+        println!("tarball: {}", selected.tarball_url);
+    }
+    println!(
+        "install latest: vpm install {} --registry {}",
+        selected.name,
+        normalize_registry(registry)
+    );
+    println!(
+        "install exact: vpm install {} --version {} --registry {}",
+        selected.name,
+        selected.version,
+        normalize_registry(registry)
+    );
+
+    let version_list = versions
+        .iter()
+        .map(|pkg| pkg.version.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!("versions: {version_list}");
+
+    if readme {
+        if selected.readme.trim().is_empty() {
+            println!("\nREADME: <empty>");
+        } else {
+            println!("\nREADME:\n{}", selected.readme);
+        }
+    } else {
+        println!("hint: pass --readme to print the README");
+    }
+
+    Ok(())
+}
+
+fn cmd_list() -> Result<(), String> {
+    let lock = read_lockfile_or_default(Path::new("void.lock"))?;
+    if lock.packages.is_empty() {
+        println!("No packages in void.lock");
+        return Ok(());
+    }
+
+    let mut names = lock.packages.keys().cloned().collect::<Vec<_>>();
+    names.sort();
+
+    for name in names {
+        if let Some(pkg) = lock.packages.get(&name) {
+            let installed = PathBuf::from("void_modules").join(&name).exists();
+            let status = if installed { "installed" } else { "missing" };
+            println!(
+                "{}@{} [{}] registry={}",
+                name, pkg.version, status, pkg.registry
+            );
+        }
+    }
+    Ok(())
+}
+
+fn cmd_remove(name: &str) -> Result<(), String> {
+    validate_package_name(name)?;
+
+    let mut removed_any = false;
+    let module_dir = PathBuf::from("void_modules").join(name);
+    if module_dir.exists() {
+        remove_dir_tree(&module_dir)?;
+        println!("Removed {}", module_dir.display());
+        removed_any = true;
+    }
+
+    let lock_path = Path::new("void.lock");
+    let mut lock = read_lockfile_or_default(lock_path)?;
+    if lock.packages.remove(name).is_some() {
+        write_lockfile(lock_path, &lock)?;
+        println!("Removed {name} from void.lock");
+        removed_any = true;
+    }
+
+    if !removed_any {
+        return Err(format!("Package '{name}' not found in void_modules or void.lock"));
     }
 
     Ok(())
@@ -404,13 +673,16 @@ fn cmd_search(registry: &str, query: &str) -> Result<(), String> {
 fn cmd_install(registry: &str, name: &str, version: Option<&str>) -> Result<(), String> {
     validate_package_name(name)?;
 
-    let client = Client::new();
-    let versions = fetch_registry_package_versions(&client, registry, name)?;
-    if versions.is_empty() {
-        return Err(format!("Package '{name}' not found"));
-    }
-
-    let selected = select_version(&versions, version)?;
+    let client = new_http_client()?;
+    let selected = if let Some(target_version) = version {
+        fetch_registry_package_version(&client, registry, name, target_version)?
+    } else {
+        let versions = fetch_registry_package_versions(&client, registry, name)?;
+        versions
+            .first()
+            .cloned()
+            .ok_or_else(|| format!("Package '{name}' not found"))?
+    };
 
     let module_dir = PathBuf::from("void_modules").join(&selected.name);
     fs::create_dir_all(&module_dir).map_err(|e| e.to_string())?;
@@ -460,6 +732,25 @@ fn fetch_registry_package_versions(
     response.json().map_err(|e| e.to_string())
 }
 
+fn fetch_registry_package_version(
+    client: &Client,
+    registry: &str,
+    name: &str,
+    version: &str,
+) -> Result<PackageVersion, String> {
+    let url = format!(
+        "{}/api/packages/{}/{}",
+        normalize_registry(registry),
+        name,
+        version
+    );
+    let response = client.get(url).send().map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Registry returned status {}", response.status()));
+    }
+    response.json().map_err(|e| e.to_string())
+}
+
 fn cmd_npm_import(
     package: &str,
     version: Option<&str>,
@@ -493,7 +784,7 @@ fn cmd_npm_import(
         None
     };
 
-    let client = Client::new();
+    let client = new_http_client()?;
     let registry_versions = if install {
         fetch_registry_package_versions(&client, registry, &void_name).map_err(|err| {
             format!("Registry API is required for npm-import --install: {err}")
@@ -664,16 +955,7 @@ fn cmd_npm_import(
                 npm_name: Some(package.to_string()),
             };
 
-            let api = if let Some(token_owned) = token
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToString::to_string)
-                .or_else(|| {
-                    std::env::var("VPM_TOKEN")
-                        .ok()
-                        .map(|value| value.trim().to_string())
-                        .filter(|value| !value.is_empty())
-                }) {
+            let api = if let Some(token_owned) = resolve_auth_token(registry, token)? {
                 publish_json(&client, registry, Some(token_owned.as_str()), &payload)?
             } else {
                 publish_npm_import_guest(&client, registry, &payload)?
@@ -725,12 +1007,13 @@ fn install_from_github(module_dir: &Path, github_repo: &str) -> Result<(), Strin
     if repo_dir.exists() {
         remove_dir_tree(&repo_dir)?;
     }
+    let clone_url = normalize_repo_clone_url(github_repo);
 
     let result = Command::new("git")
         .arg("clone")
         .arg("--depth")
         .arg("1")
-        .arg(github_repo)
+        .arg(&clone_url)
         .arg(&repo_dir)
         .status();
 
@@ -738,24 +1021,142 @@ fn install_from_github(module_dir: &Path, github_repo: &str) -> Result<(), Strin
         Ok(status) if status.success() => Ok(()),
         _ => {
             let fallback = module_dir.join("SOURCE.txt");
-            fs::write(&fallback, format!("GitHub source: {github_repo}\n"))
+            fs::write(&fallback, format!("GitHub source: {clone_url}\n"))
                 .map_err(|e| e.to_string())?;
             Ok(())
         }
     }
 }
 
-fn select_version<'a>(versions: &'a [PackageVersion], desired: Option<&str>) -> Result<&'a PackageVersion, String> {
-    if let Some(target) = desired {
-        return versions
-            .iter()
-            .find(|pkg| pkg.version == target)
-            .ok_or_else(|| format!("Version '{target}' not found"));
+fn normalize_repo_clone_url(input: &str) -> String {
+    let trimmed = input.trim();
+    if let Some(rest) = trimmed.strip_prefix("git+") {
+        return rest.to_string();
+    }
+    if let Some(rest) = trimmed.strip_prefix("github:") {
+        return format!("https://github.com/{}", rest.trim_start_matches('/'));
+    }
+    trimmed.to_string()
+}
+
+fn auth_store_path() -> PathBuf {
+    if let Ok(custom) = std::env::var("VPM_AUTH_FILE")
+        && !custom.trim().is_empty()
+    {
+        return PathBuf::from(custom);
     }
 
-    versions
-        .first()
-        .ok_or_else(|| "No versions available".to_string())
+    if let Ok(home) = std::env::var("HOME")
+        && !home.trim().is_empty()
+    {
+        return PathBuf::from(home).join(".vpm").join("auth.json");
+    }
+
+    PathBuf::from(".vpm-auth.json")
+}
+
+fn read_auth_store_or_default(path: &Path) -> Result<AuthStore, String> {
+    if !path.exists() {
+        return Ok(AuthStore::default());
+    }
+
+    let raw = fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read '{}': {e}", path.display()))?;
+    serde_json::from_str::<AuthStore>(&raw)
+        .map_err(|e| format!("Invalid auth store '{}': {e}", path.display()))
+}
+
+fn write_auth_store(path: &Path, store: &AuthStore) -> Result<(), String> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create '{}': {e}", parent.display()))?;
+    }
+    let content = serde_json::to_string_pretty(store).map_err(|e| e.to_string())?;
+    fs::write(path, content)
+        .map_err(|e| format!("Failed to write '{}': {e}", path.display()))
+}
+
+fn save_auth_session(registry: &str, username: &str, token: &str) -> Result<(), String> {
+    let path = auth_store_path();
+    let mut store = read_auth_store_or_default(&path)?;
+    store.sessions.insert(
+        normalize_registry(registry).to_string(),
+        AuthSession {
+            token: token.to_string(),
+            username: username.to_string(),
+            saved_at: unix_timestamp_string(),
+        },
+    );
+    write_auth_store(&path, &store)
+}
+
+fn load_auth_session(registry: &str) -> Result<Option<AuthSession>, String> {
+    let path = auth_store_path();
+    let store = read_auth_store_or_default(&path)?;
+    Ok(store
+        .sessions
+        .get(normalize_registry(registry))
+        .cloned())
+}
+
+fn remove_auth_session(registry: &str) -> Result<bool, String> {
+    let path = auth_store_path();
+    let mut store = read_auth_store_or_default(&path)?;
+    let removed = store
+        .sessions
+        .remove(normalize_registry(registry))
+        .is_some();
+    if removed {
+        write_auth_store(&path, &store)?;
+    }
+    Ok(removed)
+}
+
+fn resolve_auth_token(registry: &str, explicit: Option<&str>) -> Result<Option<String>, String> {
+    if let Some(token) = explicit
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(Some(token.to_string()));
+    }
+
+    if let Ok(token_env) = std::env::var("VPM_TOKEN")
+        && !token_env.trim().is_empty()
+    {
+        return Ok(Some(token_env.trim().to_string()));
+    }
+
+    if let Some(session) = load_auth_session(registry)? {
+        return Ok(Some(session.token));
+    }
+
+    Ok(None)
+}
+
+fn unix_timestamp_string() -> String {
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(duration) => format!("unix:{}", duration.as_secs()),
+        Err(_) => "unix:0".to_string(),
+    }
+}
+
+fn read_lockfile_or_default(lock_path: &Path) -> Result<LockFile, String> {
+    if !lock_path.exists() {
+        return Ok(LockFile::default());
+    }
+
+    let data = fs::read_to_string(lock_path)
+        .map_err(|e| format!("Failed to read '{}': {e}", lock_path.display()))?;
+    serde_json::from_str::<LockFile>(&data)
+        .map_err(|e| format!("Invalid '{}': {e}", lock_path.display()))
+}
+
+fn write_lockfile(lock_path: &Path, lock: &LockFile) -> Result<(), String> {
+    let content = serde_json::to_string_pretty(lock).map_err(|e| e.to_string())?;
+    fs::write(lock_path, content)
+        .map_err(|e| format!("Failed to write '{}': {e}", lock_path.display()))
 }
 
 fn update_lockfile(
@@ -765,14 +1166,8 @@ fn update_lockfile(
     tarball_url: &str,
     github_repo: &str,
 ) -> Result<(), String> {
-    let lock_path = PathBuf::from("void.lock");
-
-    let mut lock = if lock_path.exists() {
-        let data = fs::read_to_string(&lock_path).map_err(|e| e.to_string())?;
-        serde_json::from_str::<LockFile>(&data).unwrap_or_default()
-    } else {
-        LockFile::default()
-    };
+    let lock_path = Path::new("void.lock");
+    let mut lock = read_lockfile_or_default(lock_path)?;
 
     lock.packages.insert(
         name.to_string(),
@@ -784,9 +1179,7 @@ fn update_lockfile(
         },
     );
 
-    let content = serde_json::to_string_pretty(&lock).map_err(|e| e.to_string())?;
-    fs::write(lock_path, content).map_err(|e| e.to_string())?;
-    Ok(())
+    write_lockfile(lock_path, &lock)
 }
 
 fn remove_dir_tree(path: &Path) -> Result<(), String> {

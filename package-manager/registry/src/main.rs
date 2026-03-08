@@ -12,6 +12,7 @@ use axum::{Json, Router};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{FromRow, Row, SqlitePool};
 use uuid::Uuid;
@@ -22,6 +23,9 @@ const INDEX_TEMPLATE: &str = include_str!("../templates/index.html");
 const AUTH_GUEST_TEMPLATE: &str = include_str!("../templates/auth_guest.html");
 const AUTH_USER_TEMPLATE: &str = include_str!("../templates/auth_user.html");
 const PACKAGE_CARD_TEMPLATE: &str = include_str!("../templates/package_card.html");
+const PACKAGE_DETAIL_TEMPLATE: &str = include_str!("../templates/package_detail.html");
+const VERSION_ITEM_TEMPLATE: &str = include_str!("../templates/version_item.html");
+const UPLOAD_INSPECT_TEMPLATE: &str = include_str!("../templates/upload_inspect.html");
 const NPM_GHOST_AUTHOR: &str = "npm_ghost";
 
 fn log_info(event: &str, detail: impl AsRef<str>) {
@@ -68,6 +72,7 @@ struct PackageVersion {
     github_repo: String,
     readme: String,
     created_at: String,
+    downloads: i64,
 }
 
 #[derive(Debug, Serialize, FromRow, Clone)]
@@ -77,6 +82,7 @@ struct PackageSummary {
     description: String,
     author: String,
     created_at: String,
+    downloads: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -216,6 +222,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = Router::new()
         .route("/", get(index_handler))
+        .route("/packages/{name}", get(package_detail_handler))
+        .route("/packages/{name}/{version}", get(package_version_detail_handler))
+        .route("/uploads/{file}/inspect", get(upload_file_inspect_handler))
         .route("/uploads/{file}", get(upload_file_handler))
         .route("/register", post(register_handler))
         .route("/login", post(login_handler))
@@ -226,6 +235,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/publish/npm-import", post(publish_npm_import_api_handler))
         .route("/api/publish/upload", post(publish_upload_api_handler))
         .route("/api/packages", get(list_packages_handler))
+        .route("/api/packages/{name}/{version}", get(get_package_version_handler))
         .route("/api/packages/{name}", get(get_package_handler))
         .route("/api/search", get(search_handler))
         .with_state(state);
@@ -297,6 +307,20 @@ async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS package_downloads (
+            name TEXT NOT NULL,
+            version TEXT NOT NULL,
+            downloads INTEGER NOT NULL DEFAULT 0,
+            last_downloaded_at TEXT NOT NULL,
+            PRIMARY KEY(name, version)
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     if !table_has_column(pool, "packages", "user_id").await? {
         sqlx::query("ALTER TABLE packages ADD COLUMN user_id INTEGER")
             .execute(pool)
@@ -309,6 +333,9 @@ async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     }
 
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_packages_name ON packages(name)")
+        .execute(pool)
+        .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_package_downloads_name ON package_downloads(name)")
         .execute(pool)
         .await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)")
@@ -371,8 +398,49 @@ async fn index_handler(
         &packages,
         query.q.as_deref().unwrap_or(""),
         query.message.as_deref(),
+        &state.public_base_url,
     );
 
+    Ok(Html(page))
+}
+
+async fn package_detail_handler(
+    State(state): State<AppState>,
+    AxumPath(name): AxumPath<String>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    log_info("http.package_detail", format!("render package '{}'", name));
+    let versions = fetch_package_versions(&state.db, &name)
+        .await
+        .map_err(internal_error)?;
+    if versions.is_empty() {
+        return Err((StatusCode::NOT_FOUND, "Package not found".to_string()));
+    }
+
+    let page = render_package_detail_page(&name, &versions[0], &versions, &state.public_base_url);
+    Ok(Html(page))
+}
+
+async fn package_version_detail_handler(
+    State(state): State<AppState>,
+    AxumPath((name, version)): AxumPath<(String, String)>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    log_info(
+        "http.package_version_detail",
+        format!("render package '{}@{}'", name, version),
+    );
+    let versions = fetch_package_versions(&state.db, &name)
+        .await
+        .map_err(internal_error)?;
+    if versions.is_empty() {
+        return Err((StatusCode::NOT_FOUND, "Package not found".to_string()));
+    }
+
+    let selected = versions
+        .iter()
+        .find(|pkg| pkg.version == version)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Version not found".to_string()))?;
+
+    let page = render_package_detail_page(&name, selected, &versions, &state.public_base_url);
     Ok(Html(page))
 }
 
@@ -417,6 +485,42 @@ async fn upload_file_handler(
             (StatusCode::NOT_FOUND, "not found".to_string()).into_response()
         }
     }
+}
+
+async fn upload_file_inspect_handler(
+    AxumPath(file): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    log_info("http.upload_inspect", format!("inspect file='{}'", file));
+    let safe_name = sanitize_filename(&file)
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "invalid file name".to_string()))?;
+    let file_path = state.upload_dir.join(&safe_name);
+    let bytes = std::fs::read(&file_path).map_err(|err| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("Could not read '{}': {}", file_path.display(), err),
+        )
+    })?;
+
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    let sha256 = format!("{:x}", hasher.finalize());
+    let content_type = content_type_for_path(&file_path);
+    let (preview_kind, preview) = build_upload_preview(&safe_name, &bytes);
+
+    let page = UPLOAD_INSPECT_TEMPLATE
+        .replace("{{FILE_NAME}}", &escape_html(&safe_name))
+        .replace("{{FILE_SIZE}}", &bytes.len().to_string())
+        .replace("{{SHA256}}", &sha256)
+        .replace("{{CONTENT_TYPE}}", content_type)
+        .replace(
+            "{{RAW_URL}}",
+            &escape_html(&format!("/uploads/{}", safe_name)),
+        )
+        .replace("{{PREVIEW_KIND}}", &escape_html(preview_kind))
+        .replace("{{PREVIEW}}", &escape_html(&preview));
+
+    Ok(Html(page))
 }
 
 async fn register_handler(
@@ -906,24 +1010,50 @@ async fn get_package_handler(
     AxumPath(name): AxumPath<String>,
 ) -> Result<Json<Vec<PackageVersion>>, (StatusCode, String)> {
     log_info("api.get_package", format!("fetch package '{}'", name));
-    let rows = sqlx::query_as::<_, PackageVersion>(
-        r#"
-        SELECT name, version, description, author, tarball_url, github_repo, readme, created_at
-        FROM packages
-        WHERE name = ?
-        ORDER BY created_at DESC
-        "#,
-    )
-    .bind(&name)
-    .fetch_all(&state.db)
-    .await
-    .map_err(internal_error)?;
+    let mut rows = fetch_package_versions(&state.db, &name)
+        .await
+        .map_err(internal_error)?;
+    if let Some(latest) = rows.first_mut() {
+        if let Err(err) = increment_download(&state.db, &latest.name, &latest.version).await {
+            log_warn(
+                "api.get_package",
+                format!("download increment failed for {}@{}: {}", latest.name, latest.version, err),
+            );
+        } else {
+            latest.downloads += 1;
+        }
+    }
     log_info(
         "api.get_package",
         format!("package '{}' has {} versions", name, rows.len()),
     );
 
     Ok(Json(rows))
+}
+
+async fn get_package_version_handler(
+    State(state): State<AppState>,
+    AxumPath((name, version)): AxumPath<(String, String)>,
+) -> Result<Json<PackageVersion>, (StatusCode, String)> {
+    log_info(
+        "api.get_package_version",
+        format!("fetch package '{}@{}'", name, version),
+    );
+    let mut pkg = fetch_package_version(&state.db, &name, &version)
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Package version not found".to_string()))?;
+
+    if let Err(err) = increment_download(&state.db, &pkg.name, &pkg.version).await {
+        log_warn(
+            "api.get_package_version",
+            format!("download increment failed for {}@{}: {}", pkg.name, pkg.version, err),
+        );
+    } else {
+        pkg.downloads += 1;
+    }
+
+    Ok(Json(pkg))
 }
 
 async fn search_handler(
@@ -950,7 +1080,8 @@ async fn fetch_packages(pool: &SqlitePool, query: Option<&str>) -> Result<Vec<Pa
         let like = format!("%{}%", q.trim());
         return sqlx::query_as::<_, PackageSummary>(
             r#"
-            SELECT p.name, p.version, p.description, p.author, p.created_at
+            SELECT p.name, p.version, p.description, p.author, p.created_at,
+                   COALESCE(d.total_downloads, 0) AS downloads
             FROM packages p
             INNER JOIN (
                 SELECT name, MAX(created_at) AS max_created
@@ -958,6 +1089,12 @@ async fn fetch_packages(pool: &SqlitePool, query: Option<&str>) -> Result<Vec<Pa
                 GROUP BY name
             ) latest
             ON p.name = latest.name AND p.created_at = latest.max_created
+            LEFT JOIN (
+                SELECT name, SUM(downloads) AS total_downloads
+                FROM package_downloads
+                GROUP BY name
+            ) d
+            ON p.name = d.name
             WHERE p.name LIKE ? OR p.description LIKE ? OR p.author LIKE ?
             ORDER BY p.created_at DESC
             LIMIT 100
@@ -974,7 +1111,8 @@ async fn fetch_packages(pool: &SqlitePool, query: Option<&str>) -> Result<Vec<Pa
 
     sqlx::query_as::<_, PackageSummary>(
         r#"
-        SELECT p.name, p.version, p.description, p.author, p.created_at
+        SELECT p.name, p.version, p.description, p.author, p.created_at,
+               COALESCE(d.total_downloads, 0) AS downloads
         FROM packages p
         INNER JOIN (
             SELECT name, MAX(created_at) AS max_created
@@ -982,12 +1120,77 @@ async fn fetch_packages(pool: &SqlitePool, query: Option<&str>) -> Result<Vec<Pa
             GROUP BY name
         ) latest
         ON p.name = latest.name AND p.created_at = latest.max_created
+        LEFT JOIN (
+            SELECT name, SUM(downloads) AS total_downloads
+            FROM package_downloads
+            GROUP BY name
+        ) d
+        ON p.name = d.name
         ORDER BY p.created_at DESC
         LIMIT 100
         "#,
     )
     .fetch_all(pool)
     .await
+}
+
+async fn fetch_package_versions(pool: &SqlitePool, name: &str) -> Result<Vec<PackageVersion>, sqlx::Error> {
+    sqlx::query_as::<_, PackageVersion>(
+        r#"
+        SELECT p.name, p.version, p.description, p.author, p.tarball_url, p.github_repo, p.readme, p.created_at,
+               COALESCE(d.downloads, 0) AS downloads
+        FROM packages p
+        LEFT JOIN package_downloads d
+        ON p.name = d.name AND p.version = d.version
+        WHERE p.name = ?
+        ORDER BY p.created_at DESC
+        "#,
+    )
+    .bind(name)
+    .fetch_all(pool)
+    .await
+}
+
+async fn fetch_package_version(
+    pool: &SqlitePool,
+    name: &str,
+    version: &str,
+) -> Result<Option<PackageVersion>, sqlx::Error> {
+    sqlx::query_as::<_, PackageVersion>(
+        r#"
+        SELECT p.name, p.version, p.description, p.author, p.tarball_url, p.github_repo, p.readme, p.created_at,
+               COALESCE(d.downloads, 0) AS downloads
+        FROM packages p
+        LEFT JOIN package_downloads d
+        ON p.name = d.name AND p.version = d.version
+        WHERE p.name = ? AND p.version = ?
+        LIMIT 1
+        "#,
+    )
+    .bind(name)
+    .bind(version)
+    .fetch_optional(pool)
+    .await
+}
+
+async fn increment_download(pool: &SqlitePool, name: &str, version: &str) -> Result<(), String> {
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        r#"
+        INSERT INTO package_downloads (name, version, downloads, last_downloaded_at)
+        VALUES (?, ?, 1, ?)
+        ON CONFLICT(name, version) DO UPDATE
+        SET downloads = downloads + 1,
+            last_downloaded_at = excluded.last_downloaded_at
+        "#,
+    )
+    .bind(name)
+    .bind(version)
+    .bind(now)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("Database error: {e}"))?;
+    Ok(())
 }
 
 async fn auth_user_from_cookie(pool: &SqlitePool, jar: &CookieJar) -> Result<Option<AuthUser>, String> {
@@ -1526,9 +1729,10 @@ fn render_index_page(
     packages: &[PackageSummary],
     search: &str,
     message_code: Option<&str>,
+    registry_url: &str,
 ) -> String {
     let auth_section = render_auth_section(current_user);
-    let package_cards = render_package_cards(packages);
+    let package_cards = render_package_cards(packages, registry_url);
     let message_banner = message_code
         .and_then(message_text)
         .map(|m| format!("<div class=\"notice\">{}</div>", escape_html(m)))
@@ -1549,22 +1753,229 @@ fn render_auth_section(current_user: Option<&AuthUser>) -> String {
     AUTH_GUEST_TEMPLATE.to_string()
 }
 
-fn render_package_cards(packages: &[PackageSummary]) -> String {
+fn render_package_cards(packages: &[PackageSummary], registry_url: &str) -> String {
     if packages.is_empty() {
         return "<p class=\"muted\">No packages yet.</p>".to_string();
     }
 
     let mut html = String::new();
     for pkg in packages {
+        let install_cmd = format!(
+            "vpm install {} --registry {}",
+            pkg.name,
+            normalize_registry(registry_url)
+        );
+        let package_link = format!("/packages/{}", pkg.name);
         let card = PACKAGE_CARD_TEMPLATE
             .replace("{{NAME}}", &escape_html(&pkg.name))
             .replace("{{VERSION}}", &escape_html(&pkg.version))
             .replace("{{AUTHOR}}", &escape_html(&pkg.author))
-            .replace("{{DESCRIPTION}}", &escape_html(&pkg.description));
+            .replace("{{DESCRIPTION}}", &escape_html(&pkg.description))
+            .replace("{{DOWNLOADS}}", &pkg.downloads.to_string())
+            .replace("{{PACKAGE_LINK}}", &escape_html(&package_link))
+            .replace("{{INSTALL_CMD}}", &escape_html(&install_cmd));
         html.push_str(&card);
     }
 
     html
+}
+
+fn render_package_detail_page(
+    name: &str,
+    selected: &PackageVersion,
+    versions: &[PackageVersion],
+    registry_url: &str,
+) -> String {
+    let install_latest = format!(
+        "vpm install {} --registry {}",
+        name,
+        normalize_registry(registry_url)
+    );
+    let install_selected = format!(
+        "vpm install {} --version {} --registry {}",
+        name,
+        selected.version,
+        normalize_registry(registry_url)
+    );
+
+    let total_downloads: i64 = versions.iter().map(|v| v.downloads).sum();
+    let readme_html = render_readme_html(&selected.readme);
+    let version_items = render_version_items(name, versions, registry_url);
+    let tarball_link = if selected.tarball_url.trim().is_empty() {
+        "<span class=\"muted\">No tarball URL</span>".to_string()
+    } else {
+        format!(
+            "<a href=\"{}\" target=\"_blank\" rel=\"noopener\">Tarball</a>",
+            escape_html(&selected.tarball_url)
+        )
+    };
+    let github_url = normalize_repo_url(&selected.github_repo);
+    let github_link = if github_url.is_empty() {
+        "<span class=\"muted\">No repo URL</span>".to_string()
+    } else {
+        format!(
+            "<a href=\"{}\" target=\"_blank\" rel=\"noopener\">Source Repo</a>",
+            escape_html(&github_url)
+        )
+    };
+    let server_file_tools = if let Some(file_name) =
+        uploaded_file_name_from_tarball_url(&selected.tarball_url, registry_url)
+    {
+        let inspect_url = format!("/uploads/{}/inspect", file_name);
+        let raw_url = format!("/uploads/{}", file_name);
+        format!(
+            "<a href=\"{}\">Inspect Server File</a> <a href=\"{}\" target=\"_blank\" rel=\"noopener\">Raw Download</a>",
+            escape_html(&inspect_url),
+            escape_html(&raw_url),
+        )
+    } else {
+        "<span class=\"muted\">No uploaded server file for this version.</span>".to_string()
+    };
+
+    PACKAGE_DETAIL_TEMPLATE
+        .replace("{{NAME}}", &escape_html(name))
+        .replace("{{VERSION}}", &escape_html(&selected.version))
+        .replace("{{DESCRIPTION}}", &escape_html(&selected.description))
+        .replace("{{AUTHOR}}", &escape_html(&selected.author))
+        .replace("{{CREATED_AT}}", &escape_html(&selected.created_at))
+        .replace("{{DOWNLOADS}}", &total_downloads.to_string())
+        .replace("{{VERSION_DOWNLOADS}}", &selected.downloads.to_string())
+        .replace("{{README_HTML}}", &readme_html)
+        .replace("{{VERSION_ITEMS}}", &version_items)
+        .replace("{{INSTALL_LATEST_CMD}}", &escape_html(&install_latest))
+        .replace("{{INSTALL_SELECTED_CMD}}", &escape_html(&install_selected))
+        .replace("{{TARBALL_LINK}}", &tarball_link)
+        .replace("{{GITHUB_LINK}}", &github_link)
+        .replace("{{SERVER_FILE_TOOLS}}", &server_file_tools)
+}
+
+fn render_version_items(name: &str, versions: &[PackageVersion], registry_url: &str) -> String {
+    let mut html = String::new();
+    for version in versions {
+        let version_link = format!("/packages/{}/{}", name, version.version);
+        let install_cmd = format!(
+            "vpm install {} --version {} --registry {}",
+            name,
+            version.version,
+            normalize_registry(registry_url)
+        );
+        let item = VERSION_ITEM_TEMPLATE
+            .replace("{{VERSION_LINK}}", &escape_html(&version_link))
+            .replace("{{VERSION}}", &escape_html(&version.version))
+            .replace("{{CREATED_AT}}", &escape_html(&version.created_at))
+            .replace("{{DOWNLOADS}}", &version.downloads.to_string())
+            .replace("{{INSTALL_CMD}}", &escape_html(&install_cmd));
+        html.push_str(&item);
+    }
+    html
+}
+
+fn render_readme_html(readme: &str) -> String {
+    if readme.trim().is_empty() {
+        return "<p class=\"muted\">No README published for this version.</p>".to_string();
+    }
+
+    format!("<pre class=\"readme\">{}</pre>", escape_html(readme))
+}
+
+fn normalize_repo_url(input: &str) -> String {
+    let trimmed = input.trim();
+    if let Some(rest) = trimmed.strip_prefix("git+") {
+        return rest.to_string();
+    }
+    if let Some(rest) = trimmed.strip_prefix("github:") {
+        return format!("https://github.com/{}", rest.trim_start_matches('/'));
+    }
+    trimmed.to_string()
+}
+
+fn uploaded_file_name_from_tarball_url(tarball_url: &str, registry_url: &str) -> Option<String> {
+    let trimmed = tarball_url
+        .trim()
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .split('#')
+        .next()
+        .unwrap_or("");
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let registry_prefix = format!("{}/uploads/", normalize_registry(registry_url));
+    if let Some(rest) = trimmed.strip_prefix(&registry_prefix) {
+        return sanitize_filename(rest);
+    }
+    if let Some(rest) = trimmed.strip_prefix("/uploads/") {
+        return sanitize_filename(rest);
+    }
+    if let Some(rest) = trimmed.strip_prefix("uploads/") {
+        return sanitize_filename(rest);
+    }
+
+    if let Some((_, rest)) = trimmed.rsplit_once("/uploads/") {
+        return sanitize_filename(rest);
+    }
+
+    None
+}
+
+fn build_upload_preview<'a>(file_name: &'a str, bytes: &[u8]) -> (&'a str, String) {
+    const MAX_TEXT_CHARS: usize = 32_000;
+    const MAX_HEX_BYTES: usize = 2048;
+    const BYTES_PER_LINE: usize = 16;
+
+    if is_text_like_file_name(file_name)
+        && let Ok(text) = std::str::from_utf8(bytes)
+    {
+        let mut preview = text.chars().take(MAX_TEXT_CHARS).collect::<String>();
+        if text.chars().count() > MAX_TEXT_CHARS {
+            preview.push_str("\n\n...truncated...");
+        }
+        return ("text preview", preview);
+    }
+
+    let preview_len = bytes.len().min(MAX_HEX_BYTES);
+    let mut out = String::new();
+    for (i, chunk) in bytes[..preview_len].chunks(BYTES_PER_LINE).enumerate() {
+        let offset = i * BYTES_PER_LINE;
+        out.push_str(&format!("{offset:08x}: "));
+        for b in chunk {
+            out.push_str(&format!("{b:02x} "));
+        }
+        out.push('\n');
+    }
+    if bytes.len() > preview_len {
+        out.push_str(&format!("\n...truncated, showing first {preview_len} bytes...\n"));
+    }
+
+    ("hex preview", out)
+}
+
+fn is_text_like_file_name(file_name: &str) -> bool {
+    matches!(
+        Path::new(file_name).extension().and_then(|ext| ext.to_str()),
+        Some(
+            "txt"
+                | "md"
+                | "markdown"
+                | "json"
+                | "toml"
+                | "yaml"
+                | "yml"
+                | "void"
+                | "js"
+                | "mjs"
+                | "cjs"
+                | "ts"
+                | "tsx"
+                | "jsx"
+                | "css"
+                | "html"
+                | "xml"
+                | "csv"
+        )
+    )
 }
 
 fn escape_html(input: &str) -> String {
@@ -1574,6 +1985,10 @@ fn escape_html(input: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
+}
+
+fn normalize_registry(input: &str) -> &str {
+    input.trim_end_matches('/')
 }
 
 fn content_type_for_path(path: &Path) -> &'static str {

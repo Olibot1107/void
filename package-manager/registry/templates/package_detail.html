@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{NAME}} · Void Registry</title>
+  <style>
+    :root {
+      --bg: #f2f8f5;
+      --ink: #0e1d21;
+      --ink-soft: #4a5f66;
+      --line: #d2e5de;
+      --card: #ffffff;
+      --brand: #0f766e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
+      background:
+        radial-gradient(circle at 10% 0%, #d0efe9 0, #f2f8f5 38%),
+        linear-gradient(180deg, #f2f8f5, #ecf6f2);
+    }
+    .shell {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 28px 16px 40px;
+    }
+    .top {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .title {
+      margin: 0;
+      font-size: 30px;
+    }
+    .muted { color: var(--ink-soft); }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.35fr 0.65fr;
+      gap: 16px;
+    }
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 10px 26px rgba(15, 118, 110, 0.08);
+    }
+    code {
+      background: #eaf2ef;
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-size: 12px;
+    }
+    pre.readme {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      background: #f7fbf9;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.45;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .ver-list {
+      display: grid;
+      gap: 8px;
+      max-height: 520px;
+      overflow: auto;
+      padding-right: 2px;
+    }
+    a {
+      color: var(--brand);
+      text-decoration: none;
+      font-weight: 700;
+    }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="top">
+      <div>
+        <a href="/">← Back to registry</a>
+        <h1 class="title">{{NAME}} <code>{{VERSION}}</code></h1>
+        <div class="muted">{{DESCRIPTION}}</div>
+      </div>
+      <div class="muted">by {{AUTHOR}}</div>
+    </div>
+
+    <section class="grid">
+      <article class="card">
+        <h2>README</h2>
+        {{README_HTML}}
+      </article>
+
+      <aside class="card">
+        <h2>Package Info</h2>
+        <div class="row">
+          <div><strong>Total downloads:</strong> {{DOWNLOADS}}</div>
+          <div><strong>This version:</strong> {{VERSION_DOWNLOADS}}</div>
+        </div>
+        <div class="row">
+          <div><strong>Published:</strong> {{CREATED_AT}}</div>
+        </div>
+        <div class="row">
+          <div>{{GITHUB_LINK}}</div>
+          <div>{{TARBALL_LINK}}</div>
+        </div>
+        <div class="row">
+          <div>{{SERVER_FILE_TOOLS}}</div>
+        </div>
+        <h3>Install</h3>
+        <p><code>{{INSTALL_LATEST_CMD}}</code></p>
+        <p><code>{{INSTALL_SELECTED_CMD}}</code></p>
+      </aside>
+    </section>
+
+    <section class="card" style="margin-top:16px;">
+      <h2>Versions</h2>
+      <div class="ver-list">
+        {{VERSION_ITEMS}}
+      </div>
+    </section>
+  </div>
+</body>
+</html>
