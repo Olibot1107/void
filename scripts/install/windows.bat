@@ -30,34 +30,112 @@ echo.
 
 git --version >nul 2>&1
 if errorlevel 1 (
-    color 4F
-    echo %ERROR% Git is not installed or not in PATH
+    color 0E
+    echo %WARNING% Git is not installed or not in PATH.
     echo.
-    echo Please install Git from: https://git-scm.com/download/win
+    set /p GIT_INSTALL_CHOICE=Install Git automatically now? [Y/N]: 
+    if /I "!GIT_INSTALL_CHOICE!"=="N" (
+        color 4F
+        echo %ERROR% Git is required to install Void.
+        echo Please install Git first: https://git-scm.com/download/win
+        color 07
+        pause
+        exit /b 1
+    )
+    if not "!GIT_INSTALL_CHOICE!"=="" if /I not "!GIT_INSTALL_CHOICE!"=="Y" (
+        color 4F
+        echo %ERROR% Invalid choice. Please run installer again and answer Y or N.
+        color 07
+        pause
+        exit /b 1
+    )
+
+    where winget >nul 2>&1
+    if errorlevel 1 (
+        color 4F
+        echo %ERROR% Automatic Git install requires winget.
+        echo Install Git manually: https://git-scm.com/download/win
+        color 07
+        pause
+        exit /b 1
+    )
+
+    color 0B
+    echo %PROGRESS% Installing Git with winget...
     color 07
-    pause
-    exit /b 1
+    winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements
+    if errorlevel 1 (
+        color 4F
+        echo %ERROR% Failed to install Git with winget
+        echo Install Git manually: https://git-scm.com/download/win
+        color 07
+        pause
+        exit /b 1
+    )
+
+    if exist "%ProgramFiles%\Git\cmd\git.exe" (
+        set "PATH=%ProgramFiles%\Git\cmd;%PATH%"
+    )
+    if exist "%ProgramFiles(x86)%\Git\cmd\git.exe" (
+        set "PATH=%ProgramFiles(x86)%\Git\cmd;%PATH%"
+    )
+
+    git --version >nul 2>&1
+    if errorlevel 1 (
+        color 4F
+        echo %ERROR% Git was installed but is not available in this shell yet.
+        echo Open a new terminal and run installer again.
+        color 07
+        pause
+        exit /b 1
+    )
+
 )
 color 0A
 echo %SUCCESS% Git found
 color 07
 
 REM Check if Rust is installed
-git --version >nul 2>&1
 rustc --version >nul 2>&1
 if errorlevel 1 (
     color 0E
     echo %WARNING% Rust is not installed. Void requires Rust to build.
     echo.
+    set /p RUST_INSTALL_CHOICE=Install Rust automatically now? [Y/N]: 
+    if /I "!RUST_INSTALL_CHOICE!"=="N" (
+        color 4F
+        echo %ERROR% Rust is required to install Void.
+        echo Please install Rust first: https://rustup.rs
+        color 07
+        pause
+        exit /b 1
+    )
+    if not "!RUST_INSTALL_CHOICE!"=="" if /I not "!RUST_INSTALL_CHOICE!"=="Y" (
+        color 4F
+        echo %ERROR% Invalid choice. Please run installer again and answer Y or N.
+        color 07
+        pause
+        exit /b 1
+    )
+
     echo %PROGRESS% Installing Rust...
     color 07
     echo.
-    
+
     powershell -Command "(New-Object System.Net.ServicePointManager).SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://win.rustup.rs/x86_64'))"
-    
+
     if errorlevel 1 (
         color 4F
         echo %ERROR% Failed to install Rust
+        color 07
+        pause
+        exit /b 1
+    )
+    rustc --version >nul 2>&1
+    if errorlevel 1 (
+        color 4F
+        echo %ERROR% Rust installation completed, but rustc was not found in PATH.
+        echo Open a new terminal and run installer again.
         color 07
         pause
         exit /b 1

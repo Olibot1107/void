@@ -49,6 +49,69 @@ log_separator() {
     echo -e "${CYAN}─────────────────────────────────────────${NC}"
 }
 
+confirm() {
+    local prompt="$1"
+    local reply=""
+    while true; do
+        read -r -p "$prompt [Y/n]: " reply
+        reply="${reply:-Y}"
+        case "$reply" in
+            [Yy]* ) return 0 ;;
+            [Nn]* ) return 1 ;;
+            * ) echo "Please answer Y or N." ;;
+        esac
+    done
+}
+
+run_privileged() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    elif command -v sudo &> /dev/null; then
+        sudo "$@"
+    else
+        return 1
+    fi
+}
+
+install_git_auto() {
+    local os_name
+    os_name="$(uname -s)"
+
+    case "$os_name" in
+        Darwin)
+            if command -v brew &> /dev/null; then
+                brew install git
+                return $?
+            fi
+            xcode-select --install >/dev/null 2>&1 || true
+            return 1
+            ;;
+        Linux)
+            if command -v apt-get &> /dev/null; then
+                run_privileged apt-get update
+                run_privileged apt-get install -y git
+            elif command -v dnf &> /dev/null; then
+                run_privileged dnf install -y git
+            elif command -v yum &> /dev/null; then
+                run_privileged yum install -y git
+            elif command -v pacman &> /dev/null; then
+                run_privileged pacman -Sy --noconfirm git
+            elif command -v zypper &> /dev/null; then
+                run_privileged zypper --non-interactive install git
+            elif command -v apk &> /dev/null; then
+                run_privileged apk add --no-cache git
+            else
+                return 1
+            fi
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    command -v git &> /dev/null
+}
+
 # Main script
 log_header "Void Scripting Runtime Installer"
 
@@ -56,9 +119,23 @@ log_header "Void Scripting Runtime Installer"
 log_step "Checking prerequisites"
 log_progress "Checking Git..."
 if ! command -v git &> /dev/null; then
-    log_error "Git is not installed"
-    log_info "Please install Git: https://git-scm.com/download"
-    exit 1
+    log_warning "Git is not installed"
+    if confirm "Install Git automatically now?"; then
+        log_progress "Installing Git..."
+        if ! install_git_auto; then
+            log_error "Failed to auto-install Git"
+            if [ "$(uname -s)" = "Darwin" ]; then
+                log_info "On macOS, install Homebrew + git, or run xcode-select --install."
+            fi
+            log_info "Install Git manually: https://git-scm.com/download"
+            exit 1
+        fi
+        log_success "Git installed successfully"
+    else
+        log_error "Git is required to install Void."
+        log_info "Install Git first: https://git-scm.com/download"
+        exit 1
+    fi
 fi
 log_success "Git found"
 
@@ -66,10 +143,29 @@ log_success "Git found"
 log_progress "Checking Rust..."
 if ! command -v rustc &> /dev/null; then
     log_warning "Rust is not installed"
-    echo -e "${CYAN}Installing Rust...${NC}"
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    source $HOME/.cargo/env
-    log_success "Rust installed successfully"
+    if confirm "Install Rust automatically now?"; then
+        if ! command -v curl &> /dev/null; then
+            log_error "curl is required to auto-install Rust"
+            log_info "Please install curl, then re-run the installer."
+            exit 1
+        fi
+        echo -e "${CYAN}Installing Rust...${NC}"
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        if [ -f "$HOME/.cargo/env" ]; then
+            # shellcheck disable=SC1090
+            source "$HOME/.cargo/env"
+        fi
+        if ! command -v rustc &> /dev/null; then
+            log_error "Rust installation finished, but rustc is still not in PATH"
+            log_info "Open a new shell or source ~/.cargo/env, then run installer again."
+            exit 1
+        fi
+        log_success "Rust installed successfully"
+    else
+        log_error "Rust is required to install Void."
+        log_info "Install Rust first: https://rustup.rs"
+        exit 1
+    fi
 else
     log_success "Rust found"
 fi

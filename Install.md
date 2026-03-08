@@ -57,7 +57,7 @@ install.bat
 
 The installer automatically:
 - Checks for required dependencies (Git, Rust)
-- Installs Rust if missing
+- Prompts to auto-install Git and Rust if missing
 - Clones the Void repository
 - Builds the language runtime
 - Builds the VPM package manager (Rust binaries)
@@ -69,8 +69,8 @@ The installer automatically:
 
 ## Prerequisites
 
-- **Git** - for cloning the repository
-- **Rust** - required for building (auto-installed if missing)
+- **Git** - for cloning the repository (installer prompts to install if missing)
+- **Rust** - required for building (installer prompts to install if missing)
 - **Node.js** - not required
 
 ---
