@@ -22,26 +22,105 @@ if process.platform() == "windows" {
   host_probe = cmd.run("uname -srm")
 }
 
-let stats = json.parse("{\"ok\":0,\"warn\":0,\"crit\":0,\"total_score\":0,\"peak\":0,\"min\":999}")
 let report = ""
-let waves = 4
-let units_per_wave = 6
+let test_log = ""
+let test = json.parse("{\"pass\":0,\"fail\":0}")
+let stats = json.parse("{\"ok\":0,\"warn\":0,\"crit\":0,\"total_score\":0,\"peak\":0,\"min\":999}")
 
 let append = fn (line) {
   report = report + line + "\n"
   return null
 }
 
-let score_event = fn (cpu, mem, jitter) {
-  let score = cpu * 0.55 + mem * 0.30 + jitter * 0.15
-  return score
+let log_test = fn (line) {
+  test_log = test_log + line + "\n"
+  return null
 }
 
-append("VOID HYPERDRIVE SIM")
+let assert = fn (name, condition, detail) {
+  if condition {
+    test.pass = test.pass + 1
+    log_test("[PASS] " + name + " :: " + detail)
+  } else {
+    test.fail = test.fail + 1
+    log_test("[FAIL] " + name + " :: " + detail)
+  }
+  return null
+}
+
+append("VOID HYPERDRIVE TEST + STRESS")
 append("run_id=" + run_id)
 append("started=" + time.iso())
 append("host=" + host_probe)
 append("")
+
+// Smoke tests
+let id_a = v.id("probe")
+let id_b = v.id("probe")
+assert("void.id uniqueness", id_a != id_b, "id_a=" + id_a + " id_b=" + id_b)
+
+let rand_ok = true
+let rand_samples = 0
+while rand_samples < 128 {
+  let rv = v.rand(10, 20)
+  if rv < 10 || rv > 20 {
+    rand_ok = false
+  }
+  rand_samples = rand_samples + 1
+}
+assert("void.rand range", rand_ok, "samples=128 range=[10,20]")
+
+let smoke_path = path.join(run_dir, "smoke.txt")
+fs.write_text(smoke_path, "void-hyperdrive-smoke")
+let smoke_read = fs.read_text(smoke_path)
+assert("fs read/write", smoke_read == "void-hyperdrive-smoke", "roundtrip=" + smoke_read)
+
+let js = json.parse("{\"mode\":\"hyperdrive\",\"ok\":true,\"n\":7}")
+let js_text = json.stringify(js)
+let js_back = json.parse(js_text)
+let json_ok = js_back.mode == "hyperdrive" && js_back.ok == true && js_back.n == 7
+assert("json parse/stringify", json_ok, js_text)
+
+let status_cmd = "true"
+if process.platform() == "windows" {
+  status_cmd = "ver > nul"
+}
+let cmd_status = cmd.status(status_cmd)
+assert("cmd.status", cmd_status == 0, "status=" + cmd_status)
+
+let t0 = time.now_ms()
+time.sleep_ms(10)
+let t1 = time.now_ms()
+assert("time monotonic", t1 >= t0, "t0=" + t0 + " t1=" + t1)
+
+// Stress test
+let stress_iterations = 25000
+let stress_start = time.now_ms()
+let checksum = 0
+let i = 0
+while i < stress_iterations {
+  let payload = json.parse("{}")
+  payload.i = i
+  payload.seed = v.rand(1, 1000000)
+  payload.id = v.id("s")
+  let encoded = json.stringify(payload)
+  let decoded = json.parse(encoded)
+  checksum = checksum + decoded.seed
+  i = i + 1
+}
+let stress_ms = time.now_ms() - stress_start
+let throughput = (stress_iterations * 1000) / (stress_ms + 1)
+assert("stress checksum", checksum > 0, "checksum=" + checksum)
+assert("stress duration", stress_ms >= 0, "ms=" + stress_ms)
+
+// Simulation pass
+let waves = 4
+let units_per_wave = 6
+
+let score_event = fn (cpu, mem, jitter) {
+  let score = cpu * 0.55 + mem * 0.30 + jitter * 0.15
+  return score
+}
 
 let wave = 1
 while wave <= waves {
@@ -90,10 +169,6 @@ while wave <= waves {
     append("  unit " + unit + " => " + level + " score=" + score)
     unit = unit + 1
   }
-
-  let wave_note = path.join(run_dir, "wave-" + wave + ".txt")
-  fs.write_text(wave_note, "wave " + wave + " complete at " + time.iso())
-  time.sleep_ms(30)
   wave = wave + 1
 }
 
@@ -113,7 +188,6 @@ summary.started_ms = started_ms
 summary.finished_ms = time.now_ms()
 summary.duration_ms = summary.finished_ms - started_ms
 summary.cpu_count = v.cpu_count()
-summary.cwd = cwd
 summary.verdict = verdict
 summary.total_events = total_events
 summary.ok = stats.ok
@@ -123,23 +197,28 @@ summary.average = average
 summary.peak = stats.peak
 summary.min = stats.min
 summary.host = host_probe
-
-let summary_json = json.stringify(summary)
-let summary_path = path.join(run_dir, "summary.json")
-fs.write_text(summary_path, summary_json)
+summary.test_pass = test.pass
+summary.test_fail = test.fail
+summary.stress_iterations = stress_iterations
+summary.stress_ms = stress_ms
+summary.stress_throughput = throughput
 
 append("")
 append("verdict=" + verdict)
 append("events=" + total_events + " ok=" + stats.ok + " warn=" + stats.warn + " crit=" + stats.crit)
 append("average=" + average + " peak=" + stats.peak + " min=" + stats.min)
+append("tests pass=" + test.pass + " fail=" + test.fail)
+append("stress iterations=" + stress_iterations + " ms=" + stress_ms + " throughput=" + throughput + "/s")
 append("duration_ms=" + summary.duration_ms)
 
-let report_path = path.join(run_dir, "report.txt")
-fs.write_text(report_path, report)
+fs.write_text(path.join(run_dir, "summary.json"), json.stringify(summary))
+fs.write_text(path.join(run_dir, "report.txt"), report)
+fs.write_text(path.join(run_dir, "TEST_LOG.txt"), test_log)
 
 say("Void Hyperdrive complete")
 say("run_id:", run_id)
 say("verdict:", verdict, "avg:", average)
+say("tests:", "pass=" + test.pass, "fail=" + test.fail)
+say("stress:", stress_iterations + " iterations", stress_ms + "ms", throughput + "/s")
 say("artifacts:", fs.list(run_dir))
-say("summary:", summary_path)
-say("report:", report_path)
+say("note:", "no absolute file paths logged")
