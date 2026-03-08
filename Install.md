@@ -56,8 +56,8 @@ install.bat
 ## What Gets Installed
 
 The installer automatically:
-- Checks for required dependencies (Git, Rust)
-- Prompts to auto-install Git and Rust if missing
+- Checks for required dependencies (Git, Rust, C build tools)
+- Prompts to auto-install missing dependencies when possible
 - Clones the Void repository
 - Builds the language runtime
 - Builds the VPM package manager (Rust binaries)
@@ -71,6 +71,7 @@ The installer automatically:
 
 - **Git** - for cloning the repository (installer prompts to install if missing)
 - **Rust** - required for building (installer prompts to install if missing)
+- **C build tools** (`cc`, `make`, headers) - required by Rust crates with native code (installer prompts to install if missing)
 - **Node.js** - not required
 
 ---

@@ -126,6 +126,45 @@ install_git_auto() {
     command -v git &> /dev/null
 }
 
+install_c_toolchain_auto() {
+    local os_name
+    os_name="$(uname -s)"
+
+    case "$os_name" in
+        Darwin)
+            if command -v brew &> /dev/null; then
+                brew install llvm
+                return $?
+            fi
+            xcode-select --install >/dev/null 2>&1 || true
+            return 1
+            ;;
+        Linux)
+            if command -v apt-get &> /dev/null; then
+                run_privileged apt-get update
+                run_privileged apt-get install -y build-essential pkg-config
+            elif command -v dnf &> /dev/null; then
+                run_privileged dnf install -y gcc gcc-c++ make pkgconf-pkg-config
+            elif command -v yum &> /dev/null; then
+                run_privileged yum install -y gcc gcc-c++ make pkgconfig
+            elif command -v pacman &> /dev/null; then
+                run_privileged pacman -Sy --noconfirm base-devel pkgconf
+            elif command -v zypper &> /dev/null; then
+                run_privileged zypper --non-interactive install -y gcc gcc-c++ make pkg-config
+            elif command -v apk &> /dev/null; then
+                run_privileged apk add --no-cache build-base pkgconf
+            else
+                return 1
+            fi
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    command -v cc &> /dev/null
+}
+
 # Main script
 log_header "Void Scripting Runtime Installer"
 
@@ -190,6 +229,33 @@ if ! command -v rustc &> /dev/null; then
     fi
 else
     log_success "Rust found"
+fi
+
+log_progress "Checking C toolchain (cc)..."
+if ! command -v cc &> /dev/null; then
+    log_warning "C compiler (cc) is not installed"
+    if confirm "Install C build tools automatically now?"; then
+        log_progress "Installing C build tools..."
+        if ! install_c_toolchain_auto; then
+            log_error "Failed to auto-install C build tools"
+            if [ "$(uname -s)" = "Darwin" ]; then
+                log_info "On macOS, install Command Line Tools (xcode-select --install)."
+            fi
+            log_info "Install a C toolchain manually (gcc/clang + make), then re-run."
+            exit 1
+        fi
+        log_success "C build tools installed successfully"
+    else
+        if [ "$?" -eq 2 ]; then
+            log_error "Could not prompt for C toolchain confirmation (no interactive terminal)."
+            log_info "Run this script in an interactive terminal, or install build tools first."
+        fi
+        log_error "A C compiler is required to build Void dependencies."
+        log_info "Install build tools manually, then re-run installer."
+        exit 1
+    fi
+else
+    log_success "C compiler found"
 fi
 
 log_info "Node.js is not required. Void and VPM build from Rust only."
