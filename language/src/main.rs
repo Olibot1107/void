@@ -1,4 +1,5 @@
 mod ast;
+mod diagnostics;
 mod lexer;
 mod parser;
 mod runtime;
@@ -6,6 +7,7 @@ mod value;
 
 use std::path::Path;
 
+use diagnostics::{error_label, error_text};
 use runtime::Runtime;
 
 const VERSION: &str = "0.1.2";
@@ -37,7 +39,7 @@ fn main() {
             };
             let mut runtime = Runtime::new(script_args);
             if let Err(err) = runtime.run_entry(Path::new(path)) {
-                eprintln!("Void runtime error:\n{err}");
+                eprintln!("{}:\n{}", error_label("Void runtime error"), error_text(&err));
                 std::process::exit(1);
             }
         }

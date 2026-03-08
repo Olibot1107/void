@@ -11,6 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::Deserialize;
 
 use crate::ast::{BinaryOp, Expr, Stmt, UnaryOp};
+use crate::diagnostics::error_text;
 use crate::lexer;
 use crate::parser::Parser;
 use crate::value::{new_object, Env, EnvRef, Function, Value};
@@ -649,7 +650,7 @@ fn native_console_error(args: Vec<Value>) -> Result<Value, String> {
         }
         out.push_str(&value.to_text());
     }
-    eprintln!("{out}");
+    eprintln!("{}", error_text(&out));
     Ok(Value::Null)
 }
 

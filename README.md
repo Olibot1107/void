@@ -10,6 +10,7 @@ Void is a fast scripting runtime written in Rust, plus a package ecosystem (`vpm
 
 - `language/` - Void runtime, parser, core modules, examples
 - `package-manager/` - VPM CLI and package registry website/API
+- `docs/` - quick docs for usage, language functions, and VPM
 
 ## Quick Start
 
@@ -34,10 +35,10 @@ Open `http://127.0.0.1:4090` to create an account, log in, and publish packages.
 
 ```bash
 cd /path/to/your-void-project
-/Users/olie/Desktop/void/package-manager/bin/vpm
-/Users/olie/Desktop/void/package-manager/bin/vpm init my_project
-/Users/olie/Desktop/void/package-manager/bin/vpm search util --registry http://127.0.0.1:4090
-/Users/olie/Desktop/void/package-manager/bin/vpm install some_pkg --registry http://127.0.0.1:4090
+vpm
+vpm init my_project
+vpm search util --registry http://127.0.0.1:4090
+vpm install some_pkg --registry http://127.0.0.1:4090
 ```
 
 `vpm` now defaults to install mode help when run without arguments.
@@ -48,9 +49,9 @@ You can convert npm packages into Void/VPM-compatible packages:
 
 ```bash
 cd /Users/olie/Desktop/void/language
-/Users/olie/Desktop/void/package-manager/bin/vpm npm-import discord.js --as discord_js
+vpm npm-import discord.js --as discord_js
 # installs into void_modules only if you opt in:
-# /Users/olie/Desktop/void/package-manager/bin/vpm npm-import discord.js --as discord_js --install
+# vpm npm-import discord.js --as discord_js --install
 ```
 
 Default conversion output goes to `vpm-imports/<void_name>`.
@@ -68,5 +69,6 @@ console.log(djs.name, djs.version, djs.kind)
 
 ## More Docs
 
+- Unified docs index: `/Users/olie/Desktop/void/docs/README.md`
 - Language docs: `/Users/olie/Desktop/void/language/README.md`
 - Package manager docs: `/Users/olie/Desktop/void/package-manager/README.md`

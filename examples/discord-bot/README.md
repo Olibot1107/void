@@ -10,7 +10,7 @@ Run from this folder:
 
 ```bash
 cd /Users/olie/Desktop/void/examples/discord-bot
-/Users/olie/Desktop/void/package-manager/bin/vpm npm-import discord.js --as discord_js --install
+vpm npm-import discord.js --as discord_js --install
 ```
 
 That creates:

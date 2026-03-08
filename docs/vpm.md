@@ -1,0 +1,37 @@
+# Package Manager (VPM)
+
+## Start local registry
+
+```bash
+cd /Users/olie/Desktop/void/package-manager
+./bin/void-registry
+```
+
+Default URL: `http://127.0.0.1:4090`
+
+## Common commands
+
+```bash
+vpm init my_project
+vpm search util --registry http://127.0.0.1:4090
+vpm install some_pkg --registry http://127.0.0.1:4090
+vpm info some_pkg --registry http://127.0.0.1:4090
+vpm remove some_pkg
+```
+
+## Auth flow
+
+```bash
+vpm login your_user your_password \
+  --registry http://127.0.0.1:4090
+vpm whoami --registry http://127.0.0.1:4090
+vpm logout --registry http://127.0.0.1:4090
+```
+
+## NPM import
+
+```bash
+vpm npm-import discord.js --as discord_js
+```
+
+Use `--install` if you also want it installed into `void_modules`.

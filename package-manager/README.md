@@ -45,14 +45,14 @@ vpm init
 Running `vpm` with no arguments now opens install-focused help (`install` mode by default).
 
 If you use the repo launcher directly, keep it pointed at
-`/Users/olie/Desktop/void/package-manager/bin/vpm` so it can find the project root.
+`vpm` so it can find the project root.
 
 Login from CLI (token is saved for that registry):
 
 ```bash
-/Users/olie/Desktop/void/package-manager/bin/vpm login your_user your_password \
+vpm login your_user your_password \
   --registry http://127.0.0.1:4090
-/Users/olie/Desktop/void/package-manager/bin/vpm whoami --registry http://127.0.0.1:4090
+vpm whoami --registry http://127.0.0.1:4090
 ```
 
 Manual token fetch still works:
@@ -67,14 +67,14 @@ TOKEN=$(curl -sS -X POST http://127.0.0.1:4090/api/login \
 Publish JSON payload (manifest fields):
 
 ```bash
-/Users/olie/Desktop/void/package-manager/bin/vpm publish \
+vpm publish \
   --registry http://127.0.0.1:4090
 ```
 
 Publish with file upload:
 
 ```bash
-/Users/olie/Desktop/void/package-manager/bin/vpm publish \
+vpm publish \
   --registry http://127.0.0.1:4090 \
   --file ./my-package.tgz
 ```
@@ -82,7 +82,7 @@ Publish with file upload:
 Override GitHub repo at publish time:
 
 ```bash
-/Users/olie/Desktop/void/package-manager/bin/vpm publish \
+vpm publish \
   --registry http://127.0.0.1:4090 \
   --github https://github.com/owner/repo
 ```
@@ -90,29 +90,29 @@ Override GitHub repo at publish time:
 Logout:
 
 ```bash
-/Users/olie/Desktop/void/package-manager/bin/vpm logout --registry http://127.0.0.1:4090
+vpm logout --registry http://127.0.0.1:4090
 ```
 
 Install and search stay public:
 
 ```bash
-/Users/olie/Desktop/void/package-manager/bin/vpm search util --registry http://127.0.0.1:4090
-/Users/olie/Desktop/void/package-manager/bin/vpm install some_pkg --registry http://127.0.0.1:4090
-/Users/olie/Desktop/void/package-manager/bin/vpm install some_pkg --version 1.2.3 --registry http://127.0.0.1:4090
-/Users/olie/Desktop/void/package-manager/bin/vpm info some_pkg --registry http://127.0.0.1:4090
-/Users/olie/Desktop/void/package-manager/bin/vpm info some_pkg --version 1.2.3 --readme --registry http://127.0.0.1:4090
-/Users/olie/Desktop/void/package-manager/bin/vpm list
-/Users/olie/Desktop/void/package-manager/bin/vpm remove some_pkg
+vpm search util --registry http://127.0.0.1:4090
+vpm install some_pkg --registry http://127.0.0.1:4090
+vpm install some_pkg --version 1.2.3 --registry http://127.0.0.1:4090
+vpm info some_pkg --registry http://127.0.0.1:4090
+vpm info some_pkg --version 1.2.3 --readme --registry http://127.0.0.1:4090
+vpm list
+vpm remove some_pkg
 ```
 
 Convert npm package -> Void/VPM-ready package:
 
 ```bash
-/Users/olie/Desktop/void/package-manager/bin/vpm npm-import discord.js
+vpm npm-import discord.js
 # optional:
-# /Users/olie/Desktop/void/package-manager/bin/vpm npm-import @discordjs/builders --version 1.9.0 --as discord_builders
+# vpm npm-import @discordjs/builders --version 1.9.0 --as discord_builders
 # install into void_modules (opt-in):
-# /Users/olie/Desktop/void/package-manager/bin/vpm npm-import discord.js --as discord_js --install --registry http://127.0.0.1:4090 --token "$TOKEN"
+# vpm npm-import discord.js --as discord_js --install --registry http://127.0.0.1:4090 --token "$TOKEN"
 ```
 
 This command:
