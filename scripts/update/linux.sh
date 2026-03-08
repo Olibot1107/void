@@ -70,11 +70,21 @@ log_separator
 log_step "Updating repository"
 cd "$INSTALL_DIR/void"
 
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    log_error "Local changes detected in $INSTALL_DIR/void"
+    log_info "Commit or stash your changes before updating."
+    log_info "Example: git stash push -u -m 'void-update-temp'"
+    log_info "Then rerun this update script."
+    exit 1
+fi
+
 log_progress "Fetching latest changes..."
-if git pull origin main --quiet; then
+if git pull --ff-only origin main --quiet; then
     log_success "Repository updated"
 else
-    log_warning "Repository update encountered issues"
+    log_error "Repository update failed"
+    log_info "Resolve git issues, then rerun the update."
+    exit 1
 fi
 
 log_separator

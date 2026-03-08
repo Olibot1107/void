@@ -54,15 +54,42 @@ echo.
 
 cd /d "!VOID_INSTALL_DIR!\void"
 
+set "GIT_DIRTY=0"
+for /f %%I in ('git status --porcelain 2^>nul') do (
+    set "GIT_DIRTY=1"
+    goto :after_dirty_check
+)
+:after_dirty_check
+
+if "!GIT_DIRTY!"=="1" (
+    color 4F
+    echo %ERROR% Local changes detected in !VOID_INSTALL_DIR!\void
+    color 07
+    echo.
+    color 0B
+    echo %INFO% Commit or stash your changes before updating.
+    echo %INFO% Example: git stash push -u -m "void-update-temp"
+    echo %INFO% Then rerun this update script.
+    color 07
+    pause
+    exit /b 1
+)
+
 color 0B
 echo %PROGRESS% Fetching latest changes...
 color 07
 
-git pull origin main >nul 2>&1
+git pull --ff-only origin main
 if errorlevel 1 (
-    color 0E
-    echo %WARNING% Repository update encountered issues
+    color 4F
+    echo %ERROR% Repository update failed
     color 07
+    echo.
+    color 0B
+    echo %INFO% Resolve git issues, then rerun the update.
+    color 07
+    pause
+    exit /b 1
 ) else (
     color 0A
     echo %SUCCESS% Repository updated

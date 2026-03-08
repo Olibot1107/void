@@ -112,18 +112,25 @@ vpm --help
 
 If the update fails, try these steps:
 
-1. Check Git status:
+1. If you changed local files, stash or commit first:
+```bash
+cd ~/.local/void/void
+git status
+git stash push -u -m "void-update-temp"
+```
+
+2. Check Git status:
 ```bash
 cd ~/.local/void/void
 git status
 ```
 
-2. Reset to clean state:
+3. Reset to clean state (destructive):
 ```bash
 git reset --hard origin/main
 ```
 
-3. Clear build cache and rebuild:
+4. Clear build cache and rebuild:
 ```bash
 cd language
 cargo clean
