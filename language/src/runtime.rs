@@ -313,6 +313,26 @@ impl Runtime {
             Expr::String(s) => Ok(Value::from_str(s)),
             Expr::Bool(b) => Ok(Value::Bool(*b)),
             Expr::Null => Ok(Value::Null),
+            Expr::ArrayLiteral(items) => {
+                let array_obj = new_object();
+                let obj = array_obj.as_object()?;
+                for (index, item) in items.iter().enumerate() {
+                    let value = self.eval_expr(item, env, module_dir)?;
+                    obj.borrow_mut().insert(index.to_string(), value);
+                }
+                obj.borrow_mut()
+                    .insert("length".to_string(), Value::Number(items.len() as f64));
+                Ok(array_obj)
+            }
+            Expr::ObjectLiteral(entries) => {
+                let object = new_object();
+                let obj = object.as_object()?;
+                for (key, value_expr) in entries {
+                    let value = self.eval_expr(value_expr, env, module_dir)?;
+                    obj.borrow_mut().insert(key.clone(), value);
+                }
+                Ok(object)
+            }
             Expr::Var(name) => Env::get(env, name).ok_or_else(|| format!("Undefined variable '{name}'")),
             Expr::Member { object, property } => {
                 let obj = self.eval_expr(object, env, module_dir)?.as_object()?;
@@ -320,6 +340,15 @@ impl Runtime {
                     .get(property)
                     .cloned()
                     .ok_or_else(|| format!("Missing property '{property}'"))
+            }
+            Expr::Index { object, index } => {
+                let obj = self.eval_expr(object, env, module_dir)?.as_object()?;
+                let index_value = self.eval_expr(index, env, module_dir)?;
+                let key = index_key_from_value(&index_value);
+                obj.borrow()
+                    .get(&key)
+                    .cloned()
+                    .ok_or_else(|| format!("Missing property '{key}'"))
             }
             Expr::Call { callee, args } => {
                 let function = self.eval_expr(callee, env, module_dir)?.as_function()?;
@@ -624,6 +653,19 @@ fn set_object_prop(object: &Value, key: &str, value: Value) -> Result<(), String
     let obj = object.as_object()?;
     obj.borrow_mut().insert(key.to_string(), value);
     Ok(())
+}
+
+fn index_key_from_value(value: &Value) -> String {
+    match value {
+        Value::Number(n) => {
+            if (n.fract()).abs() < f64::EPSILON {
+                format!("{}", *n as i64)
+            } else {
+                value.to_text()
+            }
+        }
+        _ => value.to_text(),
+    }
 }
 
 fn native_wrap(func: fn(Vec<Value>) -> Result<Value, String>) -> Value {

@@ -35,10 +35,16 @@ pub enum Expr {
     String(String),
     Bool(bool),
     Null,
+    ArrayLiteral(Vec<Expr>),
+    ObjectLiteral(Vec<(String, Expr)>),
     Var(String),
     Member {
         object: Box<Expr>,
         property: String,
+    },
+    Index {
+        object: Box<Expr>,
+        index: Box<Expr>,
     },
     Call {
         callee: Box<Expr>,

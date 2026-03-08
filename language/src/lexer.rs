@@ -25,7 +25,10 @@ pub enum TokenKind {
     RParen,
     LBrace,
     RBrace,
+    LBracket,
+    RBracket,
     Comma,
+    Colon,
     Dot,
     Plus,
     Minus,
@@ -112,10 +115,31 @@ pub fn lex(input: &str) -> Result<Vec<Token>, String> {
                     line,
                 });
             }
+            '[' => {
+                chars.next();
+                tokens.push(Token {
+                    kind: TokenKind::LBracket,
+                    line,
+                });
+            }
+            ']' => {
+                chars.next();
+                tokens.push(Token {
+                    kind: TokenKind::RBracket,
+                    line,
+                });
+            }
             ',' => {
                 chars.next();
                 tokens.push(Token {
                     kind: TokenKind::Comma,
+                    line,
+                });
+            }
+            ':' => {
+                chars.next();
+                tokens.push(Token {
+                    kind: TokenKind::Colon,
                     line,
                 });
             }

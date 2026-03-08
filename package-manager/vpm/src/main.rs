@@ -249,7 +249,7 @@ struct NpmPackageRoot {
 struct NpmImportCacheResult {
     cache_dir: PathBuf,
     used_cache: bool,
-    converted_units: usize,
+    source_units: usize,
 }
 
 fn set_cli_runtime_config(verbose: bool, color: ColorMode) {
@@ -1225,7 +1225,7 @@ fn cmd_npm_import(
         .get("main")
         .and_then(|v| v.as_str())
         .unwrap_or("index.js");
-    let main_void = npm_main_to_void_path(main_js);
+    let main_js_resolved = npm_main_to_js_path(main_js);
     let description = version_meta
         .get("description")
         .and_then(|v| v.as_str())
@@ -1255,9 +1255,7 @@ fn cmd_npm_import(
     ));
     let cache = ensure_npm_import_cache(&client, package, &selected_version, &tarball_url)?;
     if cache.used_cache {
-        log_info(&format!(
-            "Using cached npm conversion for {package}@{selected_version}"
-        ));
+        log_info(&format!("Using cached npm import for {package}@{selected_version}"));
     }
 
     let cache_npm_dir = cache.cache_dir.join("npm");
@@ -1265,15 +1263,15 @@ fn cmd_npm_import(
     copy_dir_recursive(&cache_npm_dir, &npm_dir)?;
 
     if with_npm_deps {
-        log_warn("--with-npm-deps ignored (void-only conversion mode)");
+        install_npm_dependencies(&npm_dir.join("package"))?;
     }
     convert_loader.done();
     log_success(&format!(
-        "Converted npm source files to .void units: {}",
-        cache.converted_units
+        "Imported npm source files: {}",
+        cache.source_units
     ));
 
-    let wrapper = npm_wrapper_script(package, &selected_version, &main_void);
+    let wrapper = npm_wrapper_script(package, &selected_version, &main_js_resolved);
     fs::write(module_dir.join("index.void"), wrapper).map_err(|e| e.to_string())?;
 
     let void_manifest = serde_json::json!({
@@ -1313,8 +1311,8 @@ fn cmd_npm_import(
     fs::write(module_dir.join("voidpkg.toml"), publish_manifest).map_err(|e| e.to_string())?;
 
     let source_note = format!(
-        "This package was converted from npm to Void-only format.\n\nnpm: {}@{}\nentry.js: {}\nentry.void: {}\n\nUse in Void:\n  use \"{}\" as pkg\n",
-        package, selected_version, main_js, main_void, void_name
+        "This package was imported from npm with Node bridge mode.\n\nnpm: {}@{}\nentry.js: {}\nbridge: index.void\n\nUse in Void:\n  use \"{}\" as pkg\n  pkg.run_entry()\n",
+        package, selected_version, main_js_resolved, void_name
     );
     fs::write(module_dir.join("NPM_IMPORT.txt"), &source_note).map_err(|e| e.to_string())?;
 
@@ -1706,11 +1704,11 @@ fn ensure_npm_import_cache(
     let cache_package_dir = cache_dir.join("npm").join("package");
 
     if cache_package_dir.exists() {
-        let converted_units = count_void_units(&cache_package_dir)?;
+        let source_units = count_npm_source_units(&cache_package_dir)?;
         return Ok(NpmImportCacheResult {
             cache_dir,
             used_cache: true,
-            converted_units,
+            source_units,
         });
     }
 
@@ -1730,14 +1728,14 @@ fn ensure_npm_import_cache(
         let npm_dir = cache_dir.join("npm");
         extract_npm_tarball(&tarball_bytes, &npm_dir)?;
         let npm_package_dir = npm_dir.join("package");
-        convert_npm_tree_to_void_only(&npm_package_dir)
+        count_npm_source_units(&npm_package_dir)
     })();
 
     match result {
-        Ok(converted_units) => Ok(NpmImportCacheResult {
+        Ok(source_units) => Ok(NpmImportCacheResult {
             cache_dir,
             used_cache: false,
-            converted_units,
+            source_units,
         }),
         Err(err) => {
             let _ = remove_dir_tree(&cache_dir);
@@ -1782,8 +1780,8 @@ fn extract_npm_tarball(bytes: &[u8], destination: &Path) -> Result<(), String> {
     archive.unpack(destination).map_err(|e| e.to_string())
 }
 
-fn convert_npm_tree_to_void_only(root: &Path) -> Result<usize, String> {
-    let mut converted = 0usize;
+fn count_npm_source_units(root: &Path) -> Result<usize, String> {
+    let mut count = 0usize;
     let mut stack = vec![root.to_path_buf()];
 
     while let Some(current) = stack.pop() {
@@ -1797,27 +1795,6 @@ fn convert_npm_tree_to_void_only(root: &Path) -> Result<usize, String> {
             }
 
             if is_js_like_source(&path) {
-                convert_js_file_to_void_unit(&path, root)?;
-                converted += 1;
-            }
-        }
-    }
-
-    Ok(converted)
-}
-
-fn count_void_units(root: &Path) -> Result<usize, String> {
-    let mut count = 0usize;
-    let mut stack = vec![root.to_path_buf()];
-
-    while let Some(current) = stack.pop() {
-        let entries = fs::read_dir(&current).map_err(|e| e.to_string())?;
-        for entry in entries {
-            let entry = entry.map_err(|e| e.to_string())?;
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if path.extension().and_then(OsStr::to_str) == Some("void") {
                 count += 1;
             }
         }
@@ -1859,51 +1836,51 @@ fn is_js_like_source(path: &Path) -> bool {
     )
 }
 
-fn convert_js_file_to_void_unit(path: &Path, root: &Path) -> Result<(), String> {
-    let source = fs::read_to_string(path).unwrap_or_default();
-    let relative = path
-        .strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/");
-    let line_count = source.lines().count();
-    let byte_count = source.len();
+fn install_npm_dependencies(package_dir: &Path) -> Result<(), String> {
+    let npm_bin = if cfg!(target_os = "windows") {
+        "npm.cmd"
+    } else {
+        "npm"
+    };
+    let display_dir = package_dir.display().to_string();
+    log_info(&format!(
+        "Installing npm dependencies in {display_dir} (--with-npm-deps)"
+    ));
 
-    let first_non_empty = source
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or_default();
-    let preview = first_non_empty.chars().take(120).collect::<String>();
+    let status = Command::new(npm_bin)
+        .arg("install")
+        .arg("--omit=dev")
+        .current_dir(package_dir)
+        .status()
+        .map_err(|e| format!("Failed to execute '{npm_bin} install --omit=dev': {e}"))?;
 
-    let converted = format!(
-        "// Auto-converted from npm JS/TS source by vpm.\n\
-// Original file: {relative}\n\
-module.exports.kind = \"npm_void_unit\"\n\
-module.exports.source_file = \"{relative}\"\n\
-module.exports.lines = {line_count}\n\
-module.exports.bytes = {byte_count}\n\
-module.exports.preview = \"{}\"\n\
-module.exports.note = \"Converted to Void-only package format\"\n",
-        escape_void_string(&preview)
-    );
+    if !status.success() {
+        return Err(format!(
+            "npm install failed in {} with status {}",
+            package_dir.display(),
+            status
+        ));
+    }
 
-    let output_path = path.with_extension("void");
-    fs::write(&output_path, converted).map_err(|e| e.to_string())?;
-    fs::remove_file(path).map_err(|e| e.to_string())?;
+    log_success("Installed npm dependencies.");
     Ok(())
 }
 
-fn npm_main_to_void_path(main_js: &str) -> String {
+fn npm_main_to_js_path(main_js: &str) -> String {
     let trimmed = main_js.trim_start_matches("./");
-    let as_path = PathBuf::from(trimmed);
-    let converted = if is_js_like_source(&as_path) {
-        as_path.with_extension("void")
-    } else if as_path.extension().is_none() {
-        as_path.with_extension("void")
+    let selected = if trimmed.is_empty() {
+        PathBuf::from("index.js")
     } else {
-        as_path
+        PathBuf::from(trimmed)
     };
-    converted.to_string_lossy().replace('\\', "/")
+
+    let normalized = if selected.extension().is_none() {
+        selected.with_extension("js")
+    } else {
+        selected
+    };
+
+    normalized.to_string_lossy().replace('\\', "/")
 }
 
 fn escape_toml_string(value: &str) -> String {
@@ -1914,25 +1891,27 @@ fn escape_void_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-fn npm_wrapper_script(npm_name: &str, npm_version: &str, main_void: &str) -> String {
+fn npm_wrapper_script(npm_name: &str, npm_version: &str, main_js: &str) -> String {
     let npm_name_escaped = escape_void_string(npm_name);
     let npm_version_escaped = escape_void_string(npm_version);
-    let main_void_escaped = escape_void_string(main_void);
+    let main_js_escaped = escape_void_string(main_js);
 
     format!(
         "module.exports.name = \"{npm_name_escaped}\"\n\
 module.exports.version = \"{npm_version_escaped}\"\n\
-module.exports.kind = \"npm_to_void\"\n\
-module.exports.entry_void = \"npm/package/{main_void_escaped}\"\n\
-module.exports.runtime = \"void_only\"\n\
-module.exports.warning = \"Auto-converted npm package. Manual API adaptation may be needed.\"\n\
+module.exports.kind = \"npm_bridge\"\n\
+module.exports.entry_js = \"npm/package/{main_js_escaped}\"\n\
+module.exports.runtime = \"node_bridge\"\n\
+module.exports.warning = \"Auto-imported npm package. Uses Node.js bridge for JS runtime.\"\n\
 \n\
 module.exports.run_entry = fn () {{\n\
-  return \"void-only package: \" + module.exports.entry_void\n\
+use \"cmd\" as cmd\n\
+return cmd.run(\"node '\" + __dirname + \"/\" + module.exports.entry_js + \"'\")\n\
 }}\n\
 \n\
 module.exports.run = fn (relative_js) {{\n\
-  return \"void-only conversion mode has no JS runtime bridge\"\n\
+use \"cmd\" as cmd\n\
+return cmd.run(\"node '\" + __dirname + \"/npm/package/\" + relative_js + \"'\")\n\
 }}\n"
     )
 }

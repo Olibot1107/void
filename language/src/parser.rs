@@ -366,6 +366,17 @@ impl Parser {
                 continue;
             }
 
+            if self.matches_lbracket() {
+                self.consume_lbracket()?;
+                let index = self.parse_expr()?;
+                self.consume_rbracket()?;
+                expr = Expr::Index {
+                    object: Box::new(expr),
+                    index: Box::new(index),
+                };
+                continue;
+            }
+
             break;
         }
 
@@ -398,6 +409,14 @@ impl Parser {
             return Ok(Expr::Null);
         }
 
+        if self.matches_lbracket() {
+            return self.parse_array_literal();
+        }
+
+        if self.matches_lbrace() {
+            return self.parse_object_literal();
+        }
+
         if self.matches_ident() {
             let name = self.consume_ident()?;
             return Ok(Expr::Var(name));
@@ -415,6 +434,61 @@ impl Parser {
         }
 
         Err(self.error_here("Expected expression"))
+    }
+
+    fn parse_array_literal(&mut self) -> Result<Expr, String> {
+        self.consume_lbracket()?;
+        let mut items = Vec::new();
+
+        if !self.matches_rbracket() {
+            loop {
+                items.push(self.parse_expr()?);
+                if self.matches_comma() {
+                    self.consume_comma()?;
+                    if self.matches_rbracket() {
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+        }
+
+        self.consume_rbracket()?;
+        Ok(Expr::ArrayLiteral(items))
+    }
+
+    fn parse_object_literal(&mut self) -> Result<Expr, String> {
+        self.consume_lbrace()?;
+        let mut entries = Vec::new();
+
+        if !self.matches_rbrace() {
+            loop {
+                let key = if self.matches_ident() {
+                    self.consume_ident()?
+                } else if self.matches_string() {
+                    self.consume_string()?
+                } else {
+                    return Err(self.error_here("Expected object key"));
+                };
+
+                self.consume_colon()?;
+                let value = self.parse_expr()?;
+                entries.push((key, value));
+
+                if self.matches_comma() {
+                    self.consume_comma()?;
+                    if self.matches_rbrace() {
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+        }
+
+        self.consume_rbrace()?;
+        Ok(Expr::ObjectLiteral(entries))
     }
 
     fn parse_fn_literal(&mut self) -> Result<Expr, String> {
@@ -553,8 +627,17 @@ impl Parser {
     fn matches_rbrace(&self) -> bool {
         matches!(self.current_kind(), Some(TokenKind::RBrace))
     }
+    fn matches_lbracket(&self) -> bool {
+        matches!(self.current_kind(), Some(TokenKind::LBracket))
+    }
+    fn matches_rbracket(&self) -> bool {
+        matches!(self.current_kind(), Some(TokenKind::RBracket))
+    }
     fn matches_comma(&self) -> bool {
         matches!(self.current_kind(), Some(TokenKind::Comma))
+    }
+    fn matches_colon(&self) -> bool {
+        matches!(self.current_kind(), Some(TokenKind::Colon))
     }
     fn matches_dot(&self) -> bool {
         matches!(self.current_kind(), Some(TokenKind::Dot))
@@ -761,12 +844,36 @@ impl Parser {
             Err(self.error_here("Expected '}'"))
         }
     }
+    fn consume_lbracket(&mut self) -> Result<(), String> {
+        if self.matches_lbracket() {
+            self.pos += 1;
+            Ok(())
+        } else {
+            Err(self.error_here("Expected '['"))
+        }
+    }
+    fn consume_rbracket(&mut self) -> Result<(), String> {
+        if self.matches_rbracket() {
+            self.pos += 1;
+            Ok(())
+        } else {
+            Err(self.error_here("Expected ']'"))
+        }
+    }
     fn consume_comma(&mut self) -> Result<(), String> {
         if self.matches_comma() {
             self.pos += 1;
             Ok(())
         } else {
             Err(self.error_here("Expected ','"))
+        }
+    }
+    fn consume_colon(&mut self) -> Result<(), String> {
+        if self.matches_colon() {
+            self.pos += 1;
+            Ok(())
+        } else {
+            Err(self.error_here("Expected ':'"))
         }
     }
     fn consume_dot(&mut self) -> Result<(), String> {
