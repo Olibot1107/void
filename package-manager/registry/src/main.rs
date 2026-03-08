@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::env;
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
@@ -172,6 +173,14 @@ struct PublishDraft {
 struct UploadedFile {
     file_name: String,
     bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+struct DiscordMessageRef {
+    original_url: String,
+    guild_id: String,
+    channel_id: String,
+    message_id: String,
 }
 
 #[tokio::main]
@@ -1885,7 +1894,175 @@ fn render_readme_html(readme: &str) -> String {
         return "<p class=\"muted\">No README published for this version.</p>".to_string();
     }
 
-    format!("<pre class=\"readme\">{}</pre>", escape_html(readme))
+    let mut html = format!("<div class=\"readme\">{}</div>", render_text_with_links(readme));
+    let embeds = collect_discord_message_refs(readme);
+    if !embeds.is_empty() {
+        html.push_str("<div class=\"discord-embeds\">");
+        for embed in embeds {
+            html.push_str(&render_discord_message_embed(&embed));
+        }
+        html.push_str("</div>");
+    }
+    html
+}
+
+fn render_text_with_links(input: &str) -> String {
+    let mut out = String::new();
+    let mut index = 0;
+
+    while let Some((start, end)) = next_url_range(input, index) {
+        let token = &input[start..end];
+        let (url, trailing) = split_trailing_url_punctuation(token);
+        out.push_str(&escape_html(&input[index..start]));
+        if url.is_empty() {
+            out.push_str(&escape_html(token));
+        } else {
+            let safe_url = escape_html(url);
+            out.push_str(&format!(
+                "<a href=\"{}\" target=\"_blank\" rel=\"noopener\">{}</a>",
+                safe_url, safe_url
+            ));
+            out.push_str(&escape_html(trailing));
+        }
+        index = end;
+    }
+
+    out.push_str(&escape_html(&input[index..]));
+    out
+}
+
+fn collect_discord_message_refs(readme: &str) -> Vec<DiscordMessageRef> {
+    let mut seen = HashSet::new();
+    let mut embeds = Vec::new();
+
+    for url in extract_urls(readme) {
+        if let Some(embed) = parse_discord_message_url(&url) {
+            let dedupe_key = format!(
+                "{}:{}:{}",
+                embed.guild_id, embed.channel_id, embed.message_id
+            );
+            if seen.insert(dedupe_key) {
+                embeds.push(embed);
+            }
+        }
+    }
+
+    embeds
+}
+
+fn extract_urls(input: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    let mut index = 0;
+
+    while let Some((start, end)) = next_url_range(input, index) {
+        let token = &input[start..end];
+        let (url, _) = split_trailing_url_punctuation(token);
+        if !url.is_empty() {
+            urls.push(url.to_string());
+        }
+        index = end;
+    }
+
+    urls
+}
+
+fn next_url_range(input: &str, start_index: usize) -> Option<(usize, usize)> {
+    let rest = &input[start_index..];
+    let https_pos = rest.find("https://");
+    let http_pos = rest.find("http://");
+    let rel_start = match (https_pos, http_pos) {
+        (Some(a), Some(b)) => a.min(b),
+        (Some(a), None) => a,
+        (None, Some(b)) => b,
+        (None, None) => return None,
+    };
+    let absolute_start = start_index + rel_start;
+    let mut absolute_end = input.len();
+
+    for (offset, ch) in input[absolute_start..].char_indices() {
+        if ch.is_whitespace() {
+            absolute_end = absolute_start + offset;
+            break;
+        }
+    }
+
+    Some((absolute_start, absolute_end))
+}
+
+fn split_trailing_url_punctuation(token: &str) -> (&str, &str) {
+    let mut split_at = token.len();
+    while split_at > 0 {
+        let ch = token[..split_at].chars().next_back().unwrap_or_default();
+        if matches!(ch, '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}') {
+            split_at -= ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    (&token[..split_at], &token[split_at..])
+}
+
+fn parse_discord_message_url(url: &str) -> Option<DiscordMessageRef> {
+    let without_fragment = url.split('#').next().unwrap_or(url);
+    let base = without_fragment
+        .split('?')
+        .next()
+        .unwrap_or(without_fragment);
+
+    let prefixes = [
+        "https://discord.com/channels/",
+        "https://ptb.discord.com/channels/",
+        "https://canary.discord.com/channels/",
+        "https://discordapp.com/channels/",
+    ];
+
+    let rest = prefixes.iter().find_map(|prefix| base.strip_prefix(prefix))?;
+    let mut parts = rest.split('/');
+    let guild_id = parts.next()?.trim();
+    let channel_id = parts.next()?.trim();
+    let message_id = parts.next()?.trim();
+    if parts.any(|segment| !segment.is_empty()) {
+        return None;
+    }
+
+    if guild_id.is_empty() || channel_id.is_empty() || message_id.is_empty() {
+        return None;
+    }
+    if guild_id != "@me" && !guild_id.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    if !channel_id.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    if !message_id.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+
+    Some(DiscordMessageRef {
+        original_url: url.to_string(),
+        guild_id: guild_id.to_string(),
+        channel_id: channel_id.to_string(),
+        message_id: message_id.to_string(),
+    })
+}
+
+fn render_discord_message_embed(embed: &DiscordMessageRef) -> String {
+    let scope = if embed.guild_id == "@me" {
+        "Direct Message".to_string()
+    } else {
+        format!("Guild {}", escape_html(&embed.guild_id))
+    };
+    let channel = escape_html(&embed.channel_id);
+    let message = escape_html(&embed.message_id);
+    let href = escape_html(&embed.original_url);
+
+    format!(
+        "<article class=\"discord-embed\">\
+            <div class=\"discord-embed-title\">Discord Message Link</div>\
+            <div class=\"discord-embed-meta\">{scope} · channel <code>{channel}</code> · message <code>{message}</code></div>\
+            <a class=\"discord-embed-open\" href=\"{href}\" target=\"_blank\" rel=\"noopener\">Open in Discord</a>\
+        </article>"
+    )
 }
 
 fn normalize_repo_url(input: &str) -> String {

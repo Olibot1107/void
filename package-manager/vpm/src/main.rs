@@ -14,7 +14,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use tar::Archive;
 
-const DEFAULT_REGISTRY: &str = "http://127.0.0.1:4090";
+const DEFAULT_REGISTRY: &str = "https://vpm.voidium.uk/";
 static VPM_VERBOSE: AtomicBool = AtomicBool::new(false);
 static VPM_COLOR_MODE: AtomicU8 = AtomicU8::new(ColorMode::Auto as u8);
 
