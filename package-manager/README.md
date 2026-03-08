@@ -185,7 +185,7 @@ This command:
 - `VPM_TOKEN`: optional default API token used by `vpm npm-import --install` when `--token` is omitted
 - `VPM_AUTH_FILE`: optional path for saved CLI login sessions (default `$HOME/.vpm/auth.json`)
 - `VPM_CACHE_DIR`: base cache directory for npm imports (default `$XDG_CACHE_HOME/vpm` or `$HOME/.cache/vpm`)
-- `VOID_REGISTRY_ADDR`: bind address (default `127.0.0.1:4090`)
+- `VOID_REGISTRY_ADDR`: bind address (default `0.0.0.0:4090`)
 - `VOID_REGISTRY_PUBLIC_URL`: base URL used for uploaded file links (default derived from addr)
 - `VOID_REGISTRY_DB`: sqlite DB path (default `registry.db`)
 - `VOID_REGISTRY_UPLOADS`: upload storage directory (default `uploads`)

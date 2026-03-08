@@ -186,7 +186,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     log_info("startup", "booting void-registry");
-    let addr = env::var("VOID_REGISTRY_ADDR").unwrap_or_else(|_| "127.0.0.1:4090".to_string());
+    let addr = env::var("VOID_REGISTRY_ADDR").unwrap_or_else(|_| "0.0.0.0:4090".to_string());
     let public_base_url = env::var("VOID_REGISTRY_PUBLIC_URL")
         .unwrap_or_else(|_| default_public_url_from_addr(&addr));
 
