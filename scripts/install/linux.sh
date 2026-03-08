@@ -52,8 +52,22 @@ log_separator() {
 confirm() {
     local prompt="$1"
     local reply=""
+    local input=""
+
+    # When installer is piped (curl | bash), stdin is the script itself.
+    # Always read confirmations from the terminal instead.
+    if [ -r /dev/tty ]; then
+        input="/dev/tty"
+    elif [ -t 0 ]; then
+        input="/dev/stdin"
+    else
+        return 2
+    fi
+
     while true; do
-        read -r -p "$prompt [Y/n]: " reply
+        if ! read -r -p "$prompt [Y/n]: " reply < "$input"; then
+            return 2
+        fi
         reply="${reply:-Y}"
         case "$reply" in
             [Yy]* ) return 0 ;;
@@ -132,6 +146,10 @@ if ! command -v git &> /dev/null; then
         fi
         log_success "Git installed successfully"
     else
+        if [ "$?" -eq 2 ]; then
+            log_error "Could not prompt for Git install confirmation (no interactive terminal)."
+            log_info "Run this script in an interactive terminal, or install Git first."
+        fi
         log_error "Git is required to install Void."
         log_info "Install Git first: https://git-scm.com/download"
         exit 1
@@ -162,6 +180,10 @@ if ! command -v rustc &> /dev/null; then
         fi
         log_success "Rust installed successfully"
     else
+        if [ "$?" -eq 2 ]; then
+            log_error "Could not prompt for Rust install confirmation (no interactive terminal)."
+            log_info "Run this script in an interactive terminal, or install Rust first."
+        fi
         log_error "Rust is required to install Void."
         log_info "Install Rust first: https://rustup.rs"
         exit 1
