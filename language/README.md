@@ -16,6 +16,9 @@ Void is its own scripting runtime in Rust, with `vpm` packages plus Void-native 
   - `http`: simple blocking GET/POST
   - `json`: parse/stringify
   - `time`: clock + sleep
+  - `math`: trig, clamp, lerp, angle conversion
+  - `array`: len/get/set/push/pop/clear
+  - `object`: get/set/has/remove/keys
   - `void`: high-res time, cpu count, ids, random, uptime
 - globals:
   - `console.log(...)`, `console.error(...)`, `say(...)`, `print(...)`
@@ -35,6 +38,7 @@ cargo build --release
 ./void ./examples/app
 ./void ./examples/void_native.void
 ./void ./examples/hyperdrive.void
+./void ./examples/game_loop.void
 ```
 
 The `./void` launcher auto-rebuilds when source changes.
@@ -59,6 +63,7 @@ repeat 3 {
 ## Void-native
 
 - `repeat N { ... }` loops a fixed number of times
+- `%` modulo operator for wrap-around counters and frame cadence
 - `void.id(prefix)` for unique IDs
 - `void.now_us()` for microsecond clock access
 - `void.cpu_count()` for CPU-aware scripts
@@ -70,7 +75,7 @@ repeat 3 {
 `use "pkg" as x` resolves in this order:
 
 1. local/relative file paths (`./`, `../`, absolute)
-2. built-in runtime modules (`process`, `fs`, `path`, `cmd`, `http`, `json`, `time`, `void`)
+2. built-in runtime modules (`process`, `fs`, `path`, `cmd`, `http`, `json`, `time`, `math`, `array`, `object`, `void`)
 3. `void_modules/pkg` entry (`index.void`, `main.void`, `void.json`/`package.json`, repo entries)
 
 Directory modules are supported. For folder imports and entrypoints, Void checks:

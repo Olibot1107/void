@@ -301,6 +301,14 @@ impl Parser {
                     op: BinaryOp::Div,
                     right: Box::new(right),
                 };
+            } else if self.matches_percent() {
+                self.consume_percent()?;
+                let right = self.parse_unary()?;
+                expr = Expr::Binary {
+                    left: Box::new(expr),
+                    op: BinaryOp::Mod,
+                    right: Box::new(right),
+                };
             } else {
                 break;
             }
@@ -654,6 +662,9 @@ impl Parser {
     fn matches_slash(&self) -> bool {
         matches!(self.current_kind(), Some(TokenKind::Slash))
     }
+    fn matches_percent(&self) -> bool {
+        matches!(self.current_kind(), Some(TokenKind::Percent))
+    }
     fn matches_bang(&self) -> bool {
         matches!(self.current_kind(), Some(TokenKind::Bang))
     }
@@ -914,6 +925,14 @@ impl Parser {
             Ok(())
         } else {
             Err(self.error_here("Expected '/'"))
+        }
+    }
+    fn consume_percent(&mut self) -> Result<(), String> {
+        if self.matches_percent() {
+            self.pos += 1;
+            Ok(())
+        } else {
+            Err(self.error_here("Expected '%'"))
         }
     }
     fn consume_bang(&mut self) -> Result<(), String> {

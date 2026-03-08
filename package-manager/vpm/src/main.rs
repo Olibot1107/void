@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 
 mod cli;
 mod logging;
-mod npm;
 
 use cli::Cli;
 use cli::Commands;
@@ -24,18 +23,6 @@ use logging::muted;
 use logging::paint;
 use logging::set_cli_runtime_config;
 use logging::Loader;
-use npm::copy_dir_recursive;
-use npm::encode_npm_name;
-use npm::ensure_npm_import_cache;
-use npm::escape_toml_string;
-use npm::extract_author_name;
-use npm::extract_repository_url;
-use npm::install_npm_dependencies;
-use npm::npm_main_to_js_path;
-use npm::npm_import_cache_root;
-use npm::npm_name_to_void_name;
-use npm::npm_wrapper_script;
-use npm::read_existing_import_version;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct PackageManifest {
@@ -123,22 +110,6 @@ struct AuthSession {
     saved_at: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct NpmPackageRoot {
-    description: Option<String>,
-    repository: Option<serde_json::Value>,
-    author: Option<serde_json::Value>,
-    #[serde(rename = "dist-tags")]
-    dist_tags: HashMap<String, String>,
-    versions: HashMap<String, serde_json::Value>,
-}
-
-struct NpmImportCacheResult {
-    cache_dir: PathBuf,
-    used_cache: bool,
-    source_units: usize,
-}
-
 fn command_exists(name: &str) -> bool {
     Command::new(name)
         .arg("--version")
@@ -196,25 +167,6 @@ fn main() {
                 Ok(())
             }
         },
-        Some(Commands::NpmImport {
-            package,
-            version,
-            alias,
-            install,
-            registry,
-            token,
-            with_npm_deps,
-            out_dir,
-        }) => cmd_npm_import(
-            &package,
-            version.as_deref(),
-            alias.as_deref(),
-            install,
-            &registry,
-            token.as_deref(),
-            with_npm_deps,
-            out_dir.as_deref(),
-        ),
         None => {
             print_default_help();
             Ok(())
@@ -245,7 +197,6 @@ fn print_default_help() {
     println!("  search      Search packages by text");
     println!("  list        Show installed packages");
     println!("  publish     Publish current package");
-    println!("  npm-import  Convert npm package to Void package");
     println!("  doctor      Check environment and registry health");
     println!("  server      Start the registry server wrapper");
     println!();
@@ -472,28 +423,6 @@ fn publish_json(
     }
 
     let response = request.send().map_err(|e| e.to_string())?;
-    let status = response.status();
-    let api: ApiMessage = response.json().map_err(|e| e.to_string())?;
-
-    if !status.is_success() {
-        return Ok(api);
-    }
-
-    Ok(api)
-}
-
-fn publish_npm_import_guest(
-    client: &Client,
-    registry: &str,
-    payload: &PublishPayload,
-) -> Result<ApiMessage, String> {
-    let url = format!("{}/api/publish/npm-import", normalize_registry(registry));
-    log_verbose(&format!("POST {}", url));
-    let response = client
-        .post(url)
-        .json(payload)
-        .send()
-        .map_err(|e| e.to_string())?;
     let status = response.status();
     let api: ApiMessage = response.json().map_err(|e| e.to_string())?;
 
@@ -740,13 +669,13 @@ fn cmd_clean(lock: bool, cache: bool, imports: bool, all: bool) -> Result<(), St
     }
 
     if remove_cache {
-        let cache_root = npm_import_cache_root();
+        let cache_root = vpm_cache_root();
         if cache_root.exists() {
             remove_dir_tree(&cache_root)?;
-            log_success(&format!("Removed npm import cache {}", cache_root.display()));
+            log_success(&format!("Removed vpm cache {}", cache_root.display()));
             removed_any = true;
         } else {
-            log_verbose("npm import cache not present");
+            log_verbose("vpm cache not present");
         }
     }
 
@@ -905,274 +834,6 @@ fn fetch_registry_package_version(
         return Err(format!("Registry returned status {}", response.status()));
     }
     response.json().map_err(|e| e.to_string())
-}
-
-fn cmd_npm_import(
-    package: &str,
-    version: Option<&str>,
-    alias: Option<&str>,
-    install: bool,
-    registry: &str,
-    token: Option<&str>,
-    with_npm_deps: bool,
-    out_dir: Option<&Path>,
-) -> Result<(), String> {
-    if package.trim().is_empty() {
-        return Err("Package name cannot be empty".to_string());
-    }
-
-    let void_name = alias
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| npm_name_to_void_name(package));
-    validate_package_name(&void_name)?;
-
-    let module_dir = if install {
-        PathBuf::from("void_modules").join(&void_name)
-    } else if let Some(custom_dir) = out_dir {
-        custom_dir.join(&void_name)
-    } else {
-        PathBuf::from("vpm-imports").join(&void_name)
-    };
-
-    let pinned_version = if version.is_none() {
-        read_existing_import_version(&module_dir)
-    } else {
-        None
-    };
-
-    let client = new_http_client()?;
-    let registry_versions = if install {
-        log_info(&format!(
-            "Checking website registry for existing {} versions",
-            void_name
-        ));
-        fetch_registry_package_versions(&client, registry, &void_name).map_err(|err| {
-            format!("Registry API is required for npm-import --install: {err}")
-        })?
-    } else {
-        Vec::new()
-    };
-
-    let encoded_name = encode_npm_name(package);
-    let metadata_url = format!("https://registry.npmjs.org/{encoded_name}");
-    let metadata_loader = Loader::start(format!("Fetching npm metadata for {}", package));
-    log_verbose(&format!("GET {}", metadata_url));
-    let response = client.get(&metadata_url).send().map_err(|e| e.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "npm registry returned status {} for package '{}'",
-            response.status(),
-            package
-        ));
-    }
-
-    let root: NpmPackageRoot = response.json().map_err(|e| e.to_string())?;
-    let selected_version = match version {
-        Some(v) => v.to_string(),
-        None => {
-            if install && !registry_versions.is_empty() {
-                let existing = registry_versions
-                    .first()
-                    .map(|pkg| pkg.version.clone())
-                    .unwrap_or_default();
-                log_info(&format!(
-                    "Using website registry version {existing} for {void_name}. Pass --version to override."
-                ));
-                existing
-            } else if let Some(existing) = pinned_version {
-                log_info(&format!(
-                    "Using pinned version {existing} from previous import for {package}. Pass --version to change it."
-                ));
-                existing
-            } else {
-                root.dist_tags
-                    .get("latest")
-                    .cloned()
-                    .ok_or_else(|| format!("npm package '{package}' does not have a latest dist-tag"))?
-            }
-        }
-    };
-    metadata_loader.done();
-
-    let version_meta = root
-        .versions
-        .get(&selected_version)
-        .ok_or_else(|| format!("Version '{selected_version}' not found for npm package '{package}'"))?;
-
-    let tarball_url = version_meta
-        .get("dist")
-        .and_then(|v| v.get("tarball"))
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("npm package '{package}@{selected_version}' has no dist.tarball"))?
-        .to_string();
-
-    let main_js = version_meta
-        .get("main")
-        .and_then(|v| v.as_str())
-        .unwrap_or("index.js");
-    let main_js_resolved = npm_main_to_js_path(main_js);
-    let description = version_meta
-        .get("description")
-        .and_then(|v| v.as_str())
-        .or(root.description.as_deref())
-        .unwrap_or("npm import")
-        .to_string();
-
-    let repository = version_meta
-        .get("repository")
-        .and_then(extract_repository_url)
-        .or_else(|| root.repository.as_ref().and_then(extract_repository_url))
-        .unwrap_or_default();
-    let author = version_meta
-        .get("author")
-        .and_then(extract_author_name)
-        .or_else(|| root.author.as_ref().and_then(extract_author_name))
-        .unwrap_or_else(|| "npm".to_string());
-
-    if module_dir.exists() {
-        remove_dir_tree(&module_dir)?;
-    }
-    fs::create_dir_all(&module_dir).map_err(|e| e.to_string())?;
-
-    let convert_loader = Loader::start(format!(
-        "Converting {}@{} into Void package",
-        package, selected_version
-    ));
-    let cache = ensure_npm_import_cache(&client, package, &selected_version, &tarball_url)?;
-    if cache.used_cache {
-        log_info(&format!("Using cached npm import for {package}@{selected_version}"));
-    }
-
-    let cache_npm_dir = cache.cache_dir.join("npm");
-    let npm_dir = module_dir.join("npm");
-    copy_dir_recursive(&cache_npm_dir, &npm_dir)?;
-
-    if with_npm_deps {
-        install_npm_dependencies(&npm_dir.join("package"))?;
-    }
-    convert_loader.done();
-    log_success(&format!(
-        "Imported npm source files: {}",
-        cache.source_units
-    ));
-
-    let wrapper = npm_wrapper_script(package, &selected_version, &main_js_resolved);
-    fs::write(module_dir.join("index.void"), wrapper).map_err(|e| e.to_string())?;
-
-    let void_manifest = serde_json::json!({
-        "name": void_name,
-        "main": "index.void",
-        "source": "npm",
-        "npm_name": package,
-        "npm_version": selected_version,
-    });
-    let manifest_content =
-        serde_json::to_string_pretty(&void_manifest).map_err(|e| e.to_string())?;
-    fs::write(module_dir.join("void.json"), manifest_content).map_err(|e| e.to_string())?;
-
-    let package_metadata = serde_json::json!({
-        "name": void_name,
-        "version": selected_version,
-        "description": description,
-        "author": author,
-        "tarball_url": tarball_url,
-        "github_repo": repository,
-        "npm_name": package,
-        "main": "index.void"
-    });
-    let metadata_content =
-        serde_json::to_string_pretty(&package_metadata).map_err(|e| e.to_string())?;
-    fs::write(module_dir.join("package.json"), metadata_content).map_err(|e| e.to_string())?;
-
-    let publish_manifest = format!(
-        "name = \"{}\"\nversion = \"{}\"\ndescription = \"{}\"\nauthor = \"{}\"\ntarball_url = \"{}\"\ngithub_repo = \"{}\"\n",
-        escape_toml_string(&void_name),
-        escape_toml_string(&selected_version),
-        escape_toml_string(&format!("npm import: {package} - {description}")),
-        escape_toml_string(&author),
-        escape_toml_string(&tarball_url),
-        escape_toml_string(&repository),
-    );
-    fs::write(module_dir.join("voidpkg.toml"), publish_manifest).map_err(|e| e.to_string())?;
-
-    let source_note = format!(
-        "This package was imported from npm with Node bridge mode.\n\nnpm: {}@{}\nentry.js: {}\nbridge: index.void\n\nUse in Void:\n  use \"{}\" as pkg\n  pkg.run_entry()\n",
-        package, selected_version, main_js_resolved, void_name
-    );
-    fs::write(module_dir.join("NPM_IMPORT.txt"), &source_note).map_err(|e| e.to_string())?;
-
-    if install {
-        let registry_has_version = registry_versions
-            .iter()
-            .any(|pkg| pkg.version == selected_version);
-
-        if registry_has_version {
-            log_info(&format!(
-                "Website registry already has {}@{} (publish skipped).",
-                void_name, selected_version
-            ));
-        } else {
-            let payload = PublishPayload {
-                name: void_name.clone(),
-                version: selected_version.clone(),
-                description: Some(format!("npm import: {package} - {description}")),
-                tarball_url: Some(tarball_url.clone()),
-                github_repo: if repository.trim().is_empty() {
-                    None
-                } else {
-                    Some(repository.clone())
-                },
-                readme: Some(source_note.clone()),
-                npm_name: Some(package.to_string()),
-            };
-
-            let api = if let Some(token_owned) = resolve_auth_token(registry, token)? {
-                log_verbose("using authenticated publish for npm-import install");
-                publish_json(&client, registry, Some(token_owned.as_str()), &payload)?
-            } else {
-                log_verbose("using guest npm-import publish endpoint");
-                publish_npm_import_guest(&client, registry, &payload)?
-            };
-            if api.ok {
-                log_success(&format!(
-                    "Published {}@{} to website registry {}",
-                    void_name,
-                    selected_version,
-                    normalize_registry(registry)
-                ));
-            } else {
-                let message_lower = api.message.to_lowercase();
-                if message_lower.contains("unique") {
-                    log_info(&format!(
-                        "Website registry already contains {}@{} (duplicate publish skipped).",
-                        void_name, selected_version
-                    ));
-                } else {
-                    return Err(format!("Website registry publish failed: {}", api.message));
-                }
-            }
-        }
-
-        update_lockfile(
-            &void_name,
-            &selected_version,
-            registry,
-            &tarball_url,
-            &repository,
-        )?;
-    }
-
-    log_success(&format!("Imported npm package {package}@{selected_version}"));
-    log_info(&format!("Converted to Void package: {void_name}"));
-    log_info(&format!("Converted output: {}", module_dir.display()));
-    if install {
-        log_success("Installed into void_modules.");
-        log_info(&format!("Import from Void with: use \"{void_name}\" as pkg"));
-    } else {
-        log_info("Not installed into void_modules (default behavior).");
-        log_info("To install directly, run again with: --install");
-    }
-    Ok(())
 }
 
 fn install_from_github(module_dir: &Path, github_repo: &str) -> Result<(), String> {
@@ -1408,6 +1069,28 @@ fn validate_package_name(name: &str) -> Result<(), String> {
         return Err("Package name may only contain letters, numbers, '-' and '_'".to_string());
     }
     Ok(())
+}
+
+fn vpm_cache_root() -> PathBuf {
+    if let Ok(custom) = std::env::var("VPM_CACHE_DIR")
+        && !custom.trim().is_empty()
+    {
+        return PathBuf::from(custom);
+    }
+
+    if let Ok(xdg) = std::env::var("XDG_CACHE_HOME")
+        && !xdg.trim().is_empty()
+    {
+        return PathBuf::from(xdg).join("vpm");
+    }
+
+    if let Ok(home) = std::env::var("HOME")
+        && !home.trim().is_empty()
+    {
+        return PathBuf::from(home).join(".cache").join("vpm");
+    }
+
+    PathBuf::from(".vpm-cache")
 }
 
 fn normalize_registry(input: &str) -> &str {

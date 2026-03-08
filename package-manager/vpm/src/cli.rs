@@ -96,21 +96,4 @@ pub enum Commands {
         #[arg(long, default_value = DEFAULT_REGISTRY)]
         registry: String,
     },
-    NpmImport {
-        package: String,
-        #[arg(long)]
-        version: Option<String>,
-        #[arg(long = "as")]
-        alias: Option<String>,
-        #[arg(long)]
-        install: bool,
-        #[arg(long, default_value = DEFAULT_REGISTRY)]
-        registry: String,
-        #[arg(long)]
-        token: Option<String>,
-        #[arg(long)]
-        with_npm_deps: bool,
-        #[arg(long)]
-        out_dir: Option<PathBuf>,
-    },
 }

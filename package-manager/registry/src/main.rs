@@ -28,7 +28,6 @@ const PACKAGE_CARD_TEMPLATE: &str = include_str!("../templates/package_card.html
 const PACKAGE_DETAIL_TEMPLATE: &str = include_str!("../templates/package_detail.html");
 const VERSION_ITEM_TEMPLATE: &str = include_str!("../templates/version_item.html");
 const UPLOAD_INSPECT_TEMPLATE: &str = include_str!("../templates/upload_inspect.html");
-const NPM_GHOST_AUTHOR: &str = "npm_ghost";
 
 fn log_info(event: &str, detail: impl AsRef<str>) {
     println!(
@@ -91,17 +90,6 @@ struct PackageSummary {
 struct PublishRequest {
     name: String,
     version: String,
-    description: Option<String>,
-    tarball_url: Option<String>,
-    github_repo: Option<String>,
-    readme: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct NpmImportPublishRequest {
-    name: String,
-    version: String,
-    npm_name: String,
     description: Option<String>,
     tarball_url: Option<String>,
     github_repo: Option<String>,
@@ -251,7 +239,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/publish", post(publish_form_handler))
         .route("/api/login", post(api_login_handler))
         .route("/api/publish", post(publish_api_handler))
-        .route("/api/publish/npm-import", post(publish_npm_import_api_handler))
         .route("/api/publish/upload", post(publish_upload_api_handler))
         .route("/api/packages", get(list_packages_handler))
         .route("/api/packages/{name}/{version}", get(get_package_version_handler))
@@ -868,57 +855,6 @@ async fn publish_api_handler(
     }
 }
 
-async fn publish_npm_import_api_handler(
-    State(state): State<AppState>,
-    Json(payload): Json<NpmImportPublishRequest>,
-) -> impl IntoResponse {
-    log_info("api.publish_npm_import", "guest npm-import publish request received");
-
-    match validate_npm_import_publish_request(payload) {
-        Ok(valid) => {
-            log_info(
-                "api.publish_npm_import",
-                format!("guest publishing {}@{}", valid.name, valid.version),
-            );
-            match insert_package_guest(&state.db, valid, NPM_GHOST_AUTHOR).await {
-                Ok(()) => {
-                    log_info("api.publish_npm_import", "publish succeeded");
-                    (
-                        StatusCode::CREATED,
-                        Json(ApiMessage {
-                            ok: true,
-                            message: "Package published".to_string(),
-                        }),
-                    )
-                        .into_response()
-                }
-                Err(err) => (
-                    StatusCode::BAD_REQUEST,
-                    Json(ApiMessage {
-                        ok: false,
-                        message: err,
-                    }),
-                )
-                    .into_response(),
-            }
-        }
-        Err(err) => {
-            log_warn(
-                "api.publish_npm_import",
-                format!("validation failed: {}", err),
-            );
-            (
-                StatusCode::BAD_REQUEST,
-                Json(ApiMessage {
-                    ok: false,
-                    message: err,
-                }),
-            )
-                .into_response()
-        }
-    }
-}
-
 async fn publish_upload_api_handler(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -1322,73 +1258,6 @@ fn session_cookie(token: &str) -> Cookie<'static> {
         .build()
 }
 
-fn normalize_npm_name_for_void(npm_name: &str) -> String {
-    let mut out = String::new();
-    let mut last_was_sep = false;
-
-    for ch in npm_name.chars() {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch.to_ascii_lowercase());
-            last_was_sep = false;
-        } else if !last_was_sep {
-            out.push('_');
-            last_was_sep = true;
-        }
-    }
-
-    out.trim_matches('_').to_string()
-}
-
-fn validate_npm_import_publish_request(
-    mut payload: NpmImportPublishRequest,
-) -> Result<PublishRequest, String> {
-    payload.name = payload.name.trim().to_string();
-    payload.version = payload.version.trim().to_string();
-    payload.npm_name = payload.npm_name.trim().to_string();
-    payload.description = payload.description.map(|s| s.trim().to_string());
-    payload.tarball_url = payload.tarball_url.map(|s| s.trim().to_string());
-    payload.github_repo = payload.github_repo.map(|s| s.trim().to_string());
-
-    validate_name(&payload.name)?;
-    validate_version(&payload.version)?;
-
-    if payload.npm_name.is_empty() {
-        return Err("npm_name is required for npm-import guest publish".to_string());
-    }
-
-    let normalized = normalize_npm_name_for_void(&payload.npm_name);
-    if normalized.is_empty() {
-        return Err("npm_name is not valid".to_string());
-    }
-    let expected_prefixed = format!("npm_{}", normalized);
-    if payload.name != normalized && payload.name != expected_prefixed {
-        return Err(format!(
-            "npm-import guest publish only allows '{}' or '{}' package names",
-            normalized, expected_prefixed
-        ));
-    }
-
-    let tarball = payload.tarball_url.as_deref().unwrap_or_default();
-    if tarball.is_empty() {
-        return Err("npm-import guest publish requires tarball_url".to_string());
-    }
-    if !tarball.starts_with("https://registry.npmjs.org/") {
-        return Err("npm-import guest publish requires an npm registry tarball URL".to_string());
-    }
-    if !tarball.contains(&payload.version) {
-        return Err("tarball_url must match the published version".to_string());
-    }
-
-    Ok(PublishRequest {
-        name: payload.name,
-        version: payload.version,
-        description: payload.description,
-        tarball_url: payload.tarball_url,
-        github_repo: payload.github_repo,
-        readme: payload.readme,
-    })
-}
-
 fn validate_publish_request(mut payload: PublishRequest) -> Result<PublishRequest, String> {
     payload.name = payload.name.trim().to_string();
     payload.version = payload.version.trim().to_string();
@@ -1557,22 +1426,13 @@ fn save_upload_and_build_url(
 }
 
 async fn insert_package(pool: &SqlitePool, payload: PublishRequest, user: &AuthUser) -> Result<(), String> {
-    insert_package_with_owner(pool, payload, Some(user), None).await
-}
-
-async fn insert_package_guest(
-    pool: &SqlitePool,
-    payload: PublishRequest,
-    author_name: &str,
-) -> Result<(), String> {
-    insert_package_with_owner(pool, payload, None, Some(author_name)).await
+    insert_package_with_owner(pool, payload, Some(user)).await
 }
 
 async fn insert_package_with_owner(
     pool: &SqlitePool,
     payload: PublishRequest,
     user: Option<&AuthUser>,
-    author_override: Option<&str>,
 ) -> Result<(), String> {
     let actor = user.map(|u| format!("user='{}'", u.username)).unwrap_or_else(|| "user='<guest>'".to_string());
     log_info(
@@ -1607,10 +1467,9 @@ async fn insert_package_with_owner(
     let created_at = Utc::now().to_rfc3339();
     let package_name = payload.name.clone();
     let package_version = payload.version.clone();
-    let author = author_override
-        .map(ToString::to_string)
-        .or_else(|| user.map(|u| u.username.clone()))
-        .unwrap_or_else(|| NPM_GHOST_AUTHOR.to_string());
+    let author = user
+        .map(|u| u.username.clone())
+        .unwrap_or_else(|| "guest".to_string());
     let user_id = user.map(|u| u.id);
 
     sqlx::query(

@@ -31,6 +31,8 @@ Supported statement forms:
 - `return expr`
 - `fn(args...) { ... }` function literals
 
+Core operators include: `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `!`.
+
 ## Global functions
 
 - `say(...)` and `print(...)`: print values to stdout
@@ -103,3 +105,45 @@ Import with `use "module_name" as m`.
 - `void.uptime_ms()`
 - `void.rand()`
 - `void.rand(min, max)`
+
+### `math`
+
+- `math.pi()`
+- `math.tau()`
+- `math.e()`
+- `math.abs(x)`
+- `math.sqrt(x)`
+- `math.pow(base, exponent)`
+- `math.sin(radians)`
+- `math.cos(radians)`
+- `math.tan(radians)`
+- `math.asin(x)`
+- `math.acos(x)`
+- `math.atan(x)`
+- `math.atan2(y, x)`
+- `math.floor(x)`
+- `math.ceil(x)`
+- `math.round(x)`
+- `math.min(a, b, ...)`
+- `math.max(a, b, ...)`
+- `math.clamp(value, min, max)`
+- `math.lerp(start, end, t)`
+- `math.deg_to_rad(degrees)`
+- `math.rad_to_deg(radians)`
+
+### `array`
+
+- `array.len(array)`
+- `array.get(array, index)` (returns `null` if missing)
+- `array.set(array, index, value)` (grows `length` as needed)
+- `array.push(array, value)` (returns new length)
+- `array.pop(array)` (returns popped value or `null`)
+- `array.clear(array)`
+
+### `object`
+
+- `object.get(object, key)` (returns `null` if missing)
+- `object.set(object, key, value)`
+- `object.has(object, key)`
+- `object.remove(object, key)` (returns bool)
+- `object.keys(object)` (returns an array of keys)

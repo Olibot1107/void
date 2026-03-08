@@ -470,6 +470,48 @@ impl Runtime {
             .expect("void.uptime_ms");
         set_object_prop(&void_mod, "rand", native_wrap(native_void_rand)).expect("void.rand");
 
+        let math_mod = new_object();
+        set_object_prop(&math_mod, "pi", native_wrap(native_math_pi)).expect("math.pi");
+        set_object_prop(&math_mod, "tau", native_wrap(native_math_tau)).expect("math.tau");
+        set_object_prop(&math_mod, "e", native_wrap(native_math_e)).expect("math.e");
+        set_object_prop(&math_mod, "abs", native_wrap(native_math_abs)).expect("math.abs");
+        set_object_prop(&math_mod, "sqrt", native_wrap(native_math_sqrt)).expect("math.sqrt");
+        set_object_prop(&math_mod, "pow", native_wrap(native_math_pow)).expect("math.pow");
+        set_object_prop(&math_mod, "sin", native_wrap(native_math_sin)).expect("math.sin");
+        set_object_prop(&math_mod, "cos", native_wrap(native_math_cos)).expect("math.cos");
+        set_object_prop(&math_mod, "tan", native_wrap(native_math_tan)).expect("math.tan");
+        set_object_prop(&math_mod, "asin", native_wrap(native_math_asin)).expect("math.asin");
+        set_object_prop(&math_mod, "acos", native_wrap(native_math_acos)).expect("math.acos");
+        set_object_prop(&math_mod, "atan", native_wrap(native_math_atan)).expect("math.atan");
+        set_object_prop(&math_mod, "atan2", native_wrap(native_math_atan2)).expect("math.atan2");
+        set_object_prop(&math_mod, "floor", native_wrap(native_math_floor)).expect("math.floor");
+        set_object_prop(&math_mod, "ceil", native_wrap(native_math_ceil)).expect("math.ceil");
+        set_object_prop(&math_mod, "round", native_wrap(native_math_round)).expect("math.round");
+        set_object_prop(&math_mod, "min", native_wrap(native_math_min)).expect("math.min");
+        set_object_prop(&math_mod, "max", native_wrap(native_math_max)).expect("math.max");
+        set_object_prop(&math_mod, "clamp", native_wrap(native_math_clamp)).expect("math.clamp");
+        set_object_prop(&math_mod, "lerp", native_wrap(native_math_lerp)).expect("math.lerp");
+        set_object_prop(&math_mod, "deg_to_rad", native_wrap(native_math_deg_to_rad))
+            .expect("math.deg_to_rad");
+        set_object_prop(&math_mod, "rad_to_deg", native_wrap(native_math_rad_to_deg))
+            .expect("math.rad_to_deg");
+
+        let array_mod = new_object();
+        set_object_prop(&array_mod, "len", native_wrap(native_array_len)).expect("array.len");
+        set_object_prop(&array_mod, "get", native_wrap(native_array_get)).expect("array.get");
+        set_object_prop(&array_mod, "set", native_wrap(native_array_set)).expect("array.set");
+        set_object_prop(&array_mod, "push", native_wrap(native_array_push)).expect("array.push");
+        set_object_prop(&array_mod, "pop", native_wrap(native_array_pop)).expect("array.pop");
+        set_object_prop(&array_mod, "clear", native_wrap(native_array_clear)).expect("array.clear");
+
+        let object_mod = new_object();
+        set_object_prop(&object_mod, "get", native_wrap(native_object_get)).expect("object.get");
+        set_object_prop(&object_mod, "set", native_wrap(native_object_set)).expect("object.set");
+        set_object_prop(&object_mod, "has", native_wrap(native_object_has)).expect("object.has");
+        set_object_prop(&object_mod, "remove", native_wrap(native_object_remove))
+            .expect("object.remove");
+        set_object_prop(&object_mod, "keys", native_wrap(native_object_keys)).expect("object.keys");
+
         let process_mod = new_object();
         let args_joined = self.argv.join("\n");
         let args_for_lookup = self.argv.clone();
@@ -518,6 +560,9 @@ impl Runtime {
         modules.insert("cmd".to_string(), cmd_mod.clone());
         modules.insert("http".to_string(), http_mod.clone());
         modules.insert("json".to_string(), json_mod);
+        modules.insert("math".to_string(), math_mod);
+        modules.insert("array".to_string(), array_mod);
+        modules.insert("object".to_string(), object_mod);
         modules.insert("void".to_string(), void_mod);
 
         modules
@@ -688,6 +733,7 @@ fn eval_binary(op: BinaryOp, left: Value, right: Value) -> Result<Value, String>
         BinaryOp::Sub => Ok(Value::Number(left.as_number()? - right.as_number()?)),
         BinaryOp::Mul => Ok(Value::Number(left.as_number()? * right.as_number()?)),
         BinaryOp::Div => Ok(Value::Number(left.as_number()? / right.as_number()?)),
+        BinaryOp::Mod => Ok(Value::Number(left.as_number()? % right.as_number()?)),
         BinaryOp::Eq => Ok(Value::Bool(value_equals(&left, &right))),
         BinaryOp::Ne => Ok(Value::Bool(!value_equals(&left, &right))),
         BinaryOp::Lt => compare_values(&left, &right, |a, b| a < b),
@@ -1021,6 +1067,283 @@ fn native_void_rand(args: Vec<Value>) -> Result<Value, String> {
     }
 
     Err("void.rand() accepts 0 args or 2 args".to_string())
+}
+
+fn native_math_pi(_args: Vec<Value>) -> Result<Value, String> {
+    Ok(Value::Number(std::f64::consts::PI))
+}
+
+fn native_math_tau(_args: Vec<Value>) -> Result<Value, String> {
+    Ok(Value::Number(std::f64::consts::TAU))
+}
+
+fn native_math_e(_args: Vec<Value>) -> Result<Value, String> {
+    Ok(Value::Number(std::f64::consts::E))
+}
+
+fn native_math_abs(args: Vec<Value>) -> Result<Value, String> {
+    Ok(Value::Number(arg_number(&args, 0, "math.abs(x)")?.abs()))
+}
+
+fn native_math_sqrt(args: Vec<Value>) -> Result<Value, String> {
+    Ok(Value::Number(arg_number(&args, 0, "math.sqrt(x)")?.sqrt()))
+}
+
+fn native_math_pow(args: Vec<Value>) -> Result<Value, String> {
+    let base = arg_number(&args, 0, "math.pow(base, exponent)")?;
+    let exponent = arg_number(&args, 1, "math.pow(base, exponent)")?;
+    Ok(Value::Number(base.powf(exponent)))
+}
+
+fn native_math_sin(args: Vec<Value>) -> Result<Value, String> {
+    Ok(Value::Number(arg_number(&args, 0, "math.sin(radians)")?.sin()))
+}
+
+fn native_math_cos(args: Vec<Value>) -> Result<Value, String> {
+    Ok(Value::Number(arg_number(&args, 0, "math.cos(radians)")?.cos()))
+}
+
+fn native_math_tan(args: Vec<Value>) -> Result<Value, String> {
+    Ok(Value::Number(arg_number(&args, 0, "math.tan(radians)")?.tan()))
+}
+
+fn native_math_asin(args: Vec<Value>) -> Result<Value, String> {
+    Ok(Value::Number(arg_number(&args, 0, "math.asin(x)")?.asin()))
+}
+
+fn native_math_acos(args: Vec<Value>) -> Result<Value, String> {
+    Ok(Value::Number(arg_number(&args, 0, "math.acos(x)")?.acos()))
+}
+
+fn native_math_atan(args: Vec<Value>) -> Result<Value, String> {
+    Ok(Value::Number(arg_number(&args, 0, "math.atan(x)")?.atan()))
+}
+
+fn native_math_atan2(args: Vec<Value>) -> Result<Value, String> {
+    let y = arg_number(&args, 0, "math.atan2(y, x)")?;
+    let x = arg_number(&args, 1, "math.atan2(y, x)")?;
+    Ok(Value::Number(y.atan2(x)))
+}
+
+fn native_math_floor(args: Vec<Value>) -> Result<Value, String> {
+    Ok(Value::Number(arg_number(&args, 0, "math.floor(x)")?.floor()))
+}
+
+fn native_math_ceil(args: Vec<Value>) -> Result<Value, String> {
+    Ok(Value::Number(arg_number(&args, 0, "math.ceil(x)")?.ceil()))
+}
+
+fn native_math_round(args: Vec<Value>) -> Result<Value, String> {
+    Ok(Value::Number(arg_number(&args, 0, "math.round(x)")?.round()))
+}
+
+fn native_math_min(args: Vec<Value>) -> Result<Value, String> {
+    if args.is_empty() {
+        return Err("math.min(...) expects at least one number".to_string());
+    }
+
+    let mut current = args[0].as_number()?;
+    for value in args.iter().skip(1) {
+        current = current.min(value.as_number()?);
+    }
+    Ok(Value::Number(current))
+}
+
+fn native_math_max(args: Vec<Value>) -> Result<Value, String> {
+    if args.is_empty() {
+        return Err("math.max(...) expects at least one number".to_string());
+    }
+
+    let mut current = args[0].as_number()?;
+    for value in args.iter().skip(1) {
+        current = current.max(value.as_number()?);
+    }
+    Ok(Value::Number(current))
+}
+
+fn native_math_clamp(args: Vec<Value>) -> Result<Value, String> {
+    let value = arg_number(&args, 0, "math.clamp(value, min, max)")?;
+    let min = arg_number(&args, 1, "math.clamp(value, min, max)")?;
+    let max = arg_number(&args, 2, "math.clamp(value, min, max)")?;
+    if min > max {
+        return Err("math.clamp(value, min, max) requires min <= max".to_string());
+    }
+    Ok(Value::Number(value.clamp(min, max)))
+}
+
+fn native_math_lerp(args: Vec<Value>) -> Result<Value, String> {
+    let start = arg_number(&args, 0, "math.lerp(start, end, t)")?;
+    let end = arg_number(&args, 1, "math.lerp(start, end, t)")?;
+    let t = arg_number(&args, 2, "math.lerp(start, end, t)")?;
+    Ok(Value::Number(start + (end - start) * t))
+}
+
+fn native_math_deg_to_rad(args: Vec<Value>) -> Result<Value, String> {
+    let deg = arg_number(&args, 0, "math.deg_to_rad(degrees)")?;
+    Ok(Value::Number(deg.to_radians()))
+}
+
+fn native_math_rad_to_deg(args: Vec<Value>) -> Result<Value, String> {
+    let rad = arg_number(&args, 0, "math.rad_to_deg(radians)")?;
+    Ok(Value::Number(rad.to_degrees()))
+}
+
+fn native_array_len(args: Vec<Value>) -> Result<Value, String> {
+    let array = arg_object(&args, 0, "array.len(array)")?;
+    let length = array_len(&array.borrow());
+    Ok(Value::Number(length as f64))
+}
+
+fn native_array_get(args: Vec<Value>) -> Result<Value, String> {
+    let array = arg_object(&args, 0, "array.get(array, index)")?;
+    let index = arg_index(&args, 1, "array.get(array, index)")?;
+    let key = index.to_string();
+    let value = array.borrow().get(&key).cloned().unwrap_or(Value::Null);
+    Ok(value)
+}
+
+fn native_array_set(args: Vec<Value>) -> Result<Value, String> {
+    let array = arg_object(&args, 0, "array.set(array, index, value)")?;
+    let index = arg_index(&args, 1, "array.set(array, index, value)")?;
+    let value = args
+        .get(2)
+        .cloned()
+        .ok_or_else(|| "array.set(array, index, value) missing argument at index 2".to_string())?;
+
+    let mut obj = array.borrow_mut();
+    let length = array_len(&obj);
+    obj.insert(index.to_string(), value.clone());
+    if index + 1 > length {
+        set_array_len(&mut obj, index + 1);
+    }
+    Ok(value)
+}
+
+fn native_array_push(args: Vec<Value>) -> Result<Value, String> {
+    let array = arg_object(&args, 0, "array.push(array, value)")?;
+    let value = args
+        .get(1)
+        .cloned()
+        .ok_or_else(|| "array.push(array, value) missing argument at index 1".to_string())?;
+
+    let mut obj = array.borrow_mut();
+    let index = array_len(&obj);
+    obj.insert(index.to_string(), value);
+    set_array_len(&mut obj, index + 1);
+    Ok(Value::Number((index + 1) as f64))
+}
+
+fn native_array_pop(args: Vec<Value>) -> Result<Value, String> {
+    let array = arg_object(&args, 0, "array.pop(array)")?;
+    let mut obj = array.borrow_mut();
+    let length = array_len(&obj);
+    if length == 0 {
+        set_array_len(&mut obj, 0);
+        return Ok(Value::Null);
+    }
+
+    let index = length - 1;
+    let popped = obj.remove(&index.to_string()).unwrap_or(Value::Null);
+    set_array_len(&mut obj, index);
+    Ok(popped)
+}
+
+fn native_array_clear(args: Vec<Value>) -> Result<Value, String> {
+    let array = arg_object(&args, 0, "array.clear(array)")?;
+    let mut obj = array.borrow_mut();
+    obj.retain(|key, _| key.parse::<usize>().is_err() && key != "length");
+    set_array_len(&mut obj, 0);
+    Ok(Value::Null)
+}
+
+fn native_object_get(args: Vec<Value>) -> Result<Value, String> {
+    let object = arg_object(&args, 0, "object.get(object, key)")?;
+    let key = arg_key(&args, 1, "object.get(object, key)")?;
+    let value = object.borrow().get(&key).cloned().unwrap_or(Value::Null);
+    Ok(value)
+}
+
+fn native_object_set(args: Vec<Value>) -> Result<Value, String> {
+    let object = arg_object(&args, 0, "object.set(object, key, value)")?;
+    let key = arg_key(&args, 1, "object.set(object, key, value)")?;
+    let value = args
+        .get(2)
+        .cloned()
+        .ok_or_else(|| "object.set(object, key, value) missing argument at index 2".to_string())?;
+    object.borrow_mut().insert(key, value.clone());
+    Ok(value)
+}
+
+fn native_object_has(args: Vec<Value>) -> Result<Value, String> {
+    let object = arg_object(&args, 0, "object.has(object, key)")?;
+    let key = arg_key(&args, 1, "object.has(object, key)")?;
+    Ok(Value::Bool(object.borrow().contains_key(&key)))
+}
+
+fn native_object_remove(args: Vec<Value>) -> Result<Value, String> {
+    let object = arg_object(&args, 0, "object.remove(object, key)")?;
+    let key = arg_key(&args, 1, "object.remove(object, key)")?;
+    let removed = object.borrow_mut().remove(&key).is_some();
+    Ok(Value::Bool(removed))
+}
+
+fn native_object_keys(args: Vec<Value>) -> Result<Value, String> {
+    let object = arg_object(&args, 0, "object.keys(object)")?;
+    let mut keys: Vec<String> = object.borrow().keys().cloned().collect();
+    keys.sort();
+    Ok(array_from_strings(&keys)?)
+}
+
+fn array_len(object: &HashMap<String, Value>) -> usize {
+    if let Some(Value::Number(length)) = object.get("length") {
+        if *length >= 0.0 && length.fract() == 0.0 {
+            return *length as usize;
+        }
+    }
+
+    object
+        .keys()
+        .filter_map(|key| key.parse::<usize>().ok())
+        .max()
+        .map(|index| index + 1)
+        .unwrap_or(0)
+}
+
+fn set_array_len(object: &mut HashMap<String, Value>, len: usize) {
+    object.insert("length".to_string(), Value::Number(len as f64));
+}
+
+fn array_from_strings(values: &[String]) -> Result<Value, String> {
+    let array = new_object();
+    let obj = array.as_object()?;
+    for (index, value) in values.iter().enumerate() {
+        obj.borrow_mut()
+            .insert(index.to_string(), Value::from_str(value));
+    }
+    obj.borrow_mut()
+        .insert("length".to_string(), Value::Number(values.len() as f64));
+    Ok(array)
+}
+
+fn arg_object(args: &[Value], index: usize, signature: &str) -> Result<crate::value::ObjectRef, String> {
+    args.get(index)
+        .ok_or_else(|| format!("{signature} missing argument at index {index}"))?
+        .as_object()
+}
+
+fn arg_index(args: &[Value], index: usize, signature: &str) -> Result<usize, String> {
+    let value = arg_number(args, index, signature)?;
+    if value < 0.0 || value.fract() != 0.0 {
+        return Err(format!("{signature} expects a non-negative integer index"));
+    }
+    Ok(value as usize)
+}
+
+fn arg_key(args: &[Value], index: usize, signature: &str) -> Result<String, String> {
+    let value = args
+        .get(index)
+        .ok_or_else(|| format!("{signature} missing argument at index {index}"))?;
+    Ok(index_key_from_value(value))
 }
 
 fn arg_string<'a>(args: &'a [Value], index: usize, signature: &str) -> Result<&'a str, String> {

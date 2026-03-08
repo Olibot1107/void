@@ -48,26 +48,6 @@ vpm install some_pkg --registry http://127.0.0.1:4090
 Running `vpm` with no arguments now shows the default VPM help screen.
 For install-specific help, use `vpm install --help`.
 
-## NPM -> Void Import
-
-You can convert npm packages into Void/VPM-compatible packages:
-
-```bash
-cd /Users/olie/Desktop/void/language
-vpm npm-import discord.js --as discord_js
-# installs into void_modules only if you opt in:
-# vpm npm-import discord.js --as discord_js --install
-```
-
-Default conversion output goes to `vpm-imports/<void_name>`.
-
-If you used `--install`, then in Void:
-
-```void
-use "discord_js" as djs
-console.log(djs.name, djs.version, djs.kind)
-```
-
 ## Examples
 
 - Runtime examples: `/Users/olie/Desktop/void/language/examples`

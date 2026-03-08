@@ -1,0 +1,68 @@
+use "time" as time
+use "void" as v
+use "math" as math
+use "array" as array
+use "object" as object
+
+console.log("Void game-loop demo")
+
+let state = {}
+state.tick = 0
+state.max_ticks = 120
+state.dt = 1.0 / 60.0
+state.entities = []
+state.scoreboard = {}
+
+object.set(state.scoreboard, "hits", 0)
+object.set(state.scoreboard, "misses", 0)
+
+let spawn = fn (name, x, y, speed, angle_deg) {
+  let e = {}
+  e.id = v.id("ent")
+  e.name = name
+  e.x = x
+  e.y = y
+  e.speed = speed
+  let angle = math.deg_to_rad(angle_deg)
+  e.vx = math.cos(angle) * speed
+  e.vy = math.sin(angle) * speed
+  return e
+}
+
+array.push(state.entities, spawn("alpha", 2, 1, 5, 25))
+array.push(state.entities, spawn("beta", 10, 5, 4, 130))
+array.push(state.entities, spawn("gamma", 6, 8, 3, 280))
+
+while state.tick < state.max_ticks {
+  let i = 0
+  while i < array.len(state.entities) {
+    let e = array.get(state.entities, i)
+    e.x = e.x + e.vx * state.dt
+    e.y = e.y + e.vy * state.dt
+
+    if e.x < 0 || e.x > 20 {
+      e.vx = -e.vx
+      object.set(state.scoreboard, "hits", object.get(state.scoreboard, "hits") + 1)
+    }
+
+    if e.y < 0 || e.y > 12 {
+      e.vy = -e.vy
+      object.set(state.scoreboard, "hits", object.get(state.scoreboard, "hits") + 1)
+    }
+
+    e.x = math.clamp(e.x, 0, 20)
+    e.y = math.clamp(e.y, 0, 12)
+    i = i + 1
+  }
+
+  if state.tick % 30 == 0 {
+    let lead = array.get(state.entities, 0)
+    console.log("tick", state.tick, "lead", lead.name, "x", math.round(lead.x * 100) / 100, "y", math.round(lead.y * 100) / 100)
+  }
+
+  state.tick = state.tick + 1
+}
+
+let keys = object.keys(state.scoreboard)
+console.log("score keys:", array.len(keys))
+console.log("wall hits:", object.get(state.scoreboard, "hits"))

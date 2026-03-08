@@ -46,11 +46,3 @@ vpm login your_user your_password \
 vpm whoami --registry http://127.0.0.1:4090
 vpm logout --registry http://127.0.0.1:4090
 ```
-
-## NPM import
-
-```bash
-vpm npm-import discord.js --as discord_js
-```
-
-Use `--install` if you also want it installed into `void_modules`.

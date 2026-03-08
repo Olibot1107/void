@@ -34,6 +34,7 @@ pub enum TokenKind {
     Minus,
     Star,
     Slash,
+    Percent,
     Bang,
     Equal,
     EqualEqual,
@@ -168,6 +169,13 @@ pub fn lex(input: &str) -> Result<Vec<Token>, String> {
                 chars.next();
                 tokens.push(Token {
                     kind: TokenKind::Star,
+                    line,
+                });
+            }
+            '%' => {
+                chars.next();
+                tokens.push(Token {
+                    kind: TokenKind::Percent,
                     line,
                 });
             }
