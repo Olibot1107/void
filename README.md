@@ -33,10 +33,13 @@ Open `http://127.0.0.1:4090` to create an account, log in, and publish packages.
 
 ```bash
 cd /path/to/your-void-project
-/Users/olie/Desktop/void/package-manager/bin/vpm init
+/Users/olie/Desktop/void/package-manager/bin/vpm
+/Users/olie/Desktop/void/package-manager/bin/vpm init my_project
 /Users/olie/Desktop/void/package-manager/bin/vpm search util --registry http://127.0.0.1:4090
 /Users/olie/Desktop/void/package-manager/bin/vpm install some_pkg --registry http://127.0.0.1:4090
 ```
+
+`vpm` now defaults to install mode help when run without arguments.
 
 ## NPM -> Void Import
 

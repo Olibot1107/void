@@ -5,7 +5,7 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use flate2::read::GzDecoder;
 use reqwest::blocking::multipart::{Form as MultipartForm, Part};
 use reqwest::blocking::Client;
@@ -18,7 +18,7 @@ const DEFAULT_REGISTRY: &str = "http://127.0.0.1:4090";
 #[command(name = "vpm", about = "Void Package Manager")]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -42,7 +42,7 @@ enum Commands {
         registry: String,
     },
     Install {
-        name: String,
+        name: Option<String>,
         #[arg(long)]
         version: Option<String>,
         #[arg(long, default_value = DEFAULT_REGISTRY)]
@@ -142,27 +142,33 @@ struct NpmImportCacheResult {
 fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
-        Commands::Init { name } => cmd_init(name),
-        Commands::Publish {
+        Some(Commands::Init { name }) => cmd_init(name),
+        Some(Commands::Publish {
             registry,
             token,
             github,
             file,
-        } => cmd_publish(&registry, token.as_deref(), github.as_deref(), file.as_deref()),
-        Commands::Search { query, registry } => cmd_search(&registry, &query),
-        Commands::Install {
+        }) => cmd_publish(&registry, token.as_deref(), github.as_deref(), file.as_deref()),
+        Some(Commands::Search { query, registry }) => cmd_search(&registry, &query),
+        Some(Commands::Install {
             name,
             version,
             registry,
-        } => cmd_install(&registry, &name, version.as_deref()),
-        Commands::NpmImport {
+        }) => match name {
+            Some(pkg_name) => cmd_install(&registry, &pkg_name, version.as_deref()),
+            None => {
+                print_install_help();
+                Ok(())
+            }
+        },
+        Some(Commands::NpmImport {
             package,
             version,
             alias,
             install,
             with_npm_deps,
             out_dir,
-        } => cmd_npm_import(
+        }) => cmd_npm_import(
             &package,
             version.as_deref(),
             alias.as_deref(),
@@ -170,12 +176,32 @@ fn main() {
             with_npm_deps,
             out_dir.as_deref(),
         ),
+        None => {
+            print_install_help();
+            Ok(())
+        }
     };
 
     if let Err(err) = result {
         eprintln!("vpm error: {err}");
         std::process::exit(1);
     }
+}
+
+fn print_install_help() {
+    println!("vpm default mode: install");
+    println!();
+
+    let mut command = Cli::command();
+    if let Some(install) = command.find_subcommand_mut("install") {
+        if install.print_long_help().is_ok() {
+            println!();
+            return;
+        }
+    }
+
+    println!("Usage: vpm install <name> [--version <VERSION>] [--registry <URL>]");
+    println!("Example: vpm install my_pkg --registry {DEFAULT_REGISTRY}");
 }
 
 fn cmd_init(name: Option<String>) -> Result<(), String> {

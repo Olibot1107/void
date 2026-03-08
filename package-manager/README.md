@@ -38,8 +38,14 @@ Use `vpm` in any Void project:
 
 ```bash
 cd /path/to/your-void-project
-/Users/olie/Desktop/void/package-manager/bin/vpm init
+vpm
+vpm init
 ```
+
+Running `vpm` with no arguments now opens install-focused help (`install` mode by default).
+
+If you use the repo launcher directly, keep it pointed at
+`/Users/olie/Desktop/void/package-manager/bin/vpm` so it can find the project root.
 
 Login and get a token for CLI publish:
 

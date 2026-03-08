@@ -106,11 +106,14 @@ cd ~/.local/void/package-manager
 ./bin/void-registry
 
 # Initialize a new project
-vpm init
+vpm
+vpm init my_project
 
 # Search packages
 vpm search util --registry http://127.0.0.1:4090
 ```
+
+`vpm` now defaults to install mode help when run without arguments.
 
 ---
 
