@@ -1,6 +1,7 @@
 # Void
 
 Void is a fast scripting runtime written in Rust, plus a package ecosystem (`vpm` + web registry).
+It runs as a native Rust runtime and does not require Node.js.
 
 - [Installer](./Install.md)
 - [Updater](./Update.md)
@@ -18,9 +19,12 @@ Void is a fast scripting runtime written in Rust, plus a package ecosystem (`vpm
 
 ```bash
 cd /Users/olie/Desktop/void/language
+./void
 ./void ./examples/hello.void
 ./void ./examples/main.void
 ```
+
+`./void` with no args opens the interactive REPL.
 
 ### 2. Start the package registry
 
@@ -41,7 +45,8 @@ vpm search util --registry http://127.0.0.1:4090
 vpm install some_pkg --registry http://127.0.0.1:4090
 ```
 
-`vpm` now defaults to install mode help when run without arguments.
+Running `vpm` with no arguments now shows the default VPM help screen.
+For install-specific help, use `vpm install --help`.
 
 ## NPM -> Void Import
 
@@ -65,7 +70,7 @@ console.log(djs.name, djs.version, djs.kind)
 
 ## Examples
 
-- Discord bot example: `/Users/olie/Desktop/void/examples/discord-bot/README.md`
+- Runtime examples: `/Users/olie/Desktop/void/language/examples`
 
 ## More Docs
 

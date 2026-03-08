@@ -80,5 +80,5 @@ powershell -Command "$u='https://raw.githubusercontent.com/Olibot1107/void/refs/
 
 ## Notes
 
-- Rust, Node.js, and Git are not removed.
+- Rust and Git are not removed.
 - If you manually edited PATH, remove the Void path entry yourself.

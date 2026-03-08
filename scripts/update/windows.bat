@@ -137,30 +137,14 @@ echo.
 cd /d "!VOID_INSTALL_DIR!\void\package-manager"
 
 color 0B
-echo %PROGRESS% Installing npm dependencies...
+echo %PROGRESS% Compiling Rust package manager binaries...
 color 07
 
-call npm install
+cargo build --release --manifest-path "!VOID_INSTALL_DIR!\void\package-manager\Cargo.toml" -p vpm -p void-registry
 
 if errorlevel 1 (
     color 0E
-    echo %WARNING% npm install encountered issues
-    color 07
-) else (
-    color 0A
-    echo %SUCCESS% Dependencies installed
-    color 07
-)
-
-color 0B
-echo %PROGRESS% Building package manager...
-color 07
-
-call npm run build
-
-if errorlevel 1 (
-    color 0E
-    echo %WARNING% Build completed with issues
+    echo %WARNING% Package manager build completed with issues
     color 07
 ) else (
     color 0A

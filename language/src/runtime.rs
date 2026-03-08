@@ -20,6 +20,7 @@ pub struct Runtime {
     module_cache: HashMap<PathBuf, Value>,
     stdlib: HashMap<String, Value>,
     argv: Vec<String>,
+    repl_env: Option<EnvRef>,
 }
 
 enum ExecFlow {
@@ -44,6 +45,7 @@ impl Runtime {
             module_cache: HashMap::new(),
             stdlib: HashMap::new(),
             argv,
+            repl_env: None,
         };
         runtime.stdlib = runtime.build_stdlib();
         runtime
@@ -53,6 +55,46 @@ impl Runtime {
         let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
         let entry_path = resolve_path(&cwd, entry);
         self.load_module(&entry_path).map(|_| ())
+    }
+
+    pub fn run_repl_source(&mut self, source: &str) -> Result<Option<Value>, String> {
+        let tokens = lexer::lex(source)?;
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse_program()?;
+        let env = self.ensure_repl_env()?;
+        let module_dir = std::env::current_dir().map_err(|e| e.to_string())?;
+        Env::define(&env, "__filename", Value::from_str("[repl]"));
+        Env::define(&env, "__dirname", Value::from_str(&module_dir.display().to_string()));
+
+        let mut last_expr = None;
+        for stmt in &program {
+            match stmt {
+                Stmt::Expr(expr) => {
+                    let value = self.eval_expr(expr, &env, &module_dir)?;
+                    last_expr = Some(value);
+                }
+                _ => match self.execute_stmt(stmt, &env, &module_dir)? {
+                    ExecFlow::Continue => {}
+                    ExecFlow::Return(_) => {
+                        return Err("Return is not allowed at REPL top-level".to_string())
+                    }
+                },
+            }
+        }
+
+        Ok(last_expr)
+    }
+
+    fn ensure_repl_env(&mut self) -> Result<EnvRef, String> {
+        if let Some(env) = &self.repl_env {
+            return Ok(env.clone());
+        }
+
+        let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+        let env = Env::new(None);
+        let _ = self.bootstrap_env(&env, "[repl]", Some(cwd.as_path()))?;
+        self.repl_env = Some(env.clone());
+        Ok(env)
     }
 
     fn load_module(&mut self, file_path: &Path) -> Result<Value, String> {
@@ -73,23 +115,8 @@ impl Runtime {
         let program = parser.parse_program()?;
 
         let env = Env::new(None);
-        Env::define(&env, "say", native_wrap(native_say));
-        Env::define(&env, "print", native_wrap(native_say));
-        let console_obj = new_object();
-        set_object_prop(&console_obj, "log", native_wrap(native_say)).expect("console.log");
-        set_object_prop(&console_obj, "error", native_wrap(native_console_error))
-            .expect("console.error");
-        Env::define(&env, "console", console_obj);
-        Env::define(&env, "__filename", Value::from_str(&resolved.display().to_string()));
-        if let Some(parent) = resolved.parent() {
-            Env::define(&env, "__dirname", Value::from_str(&parent.display().to_string()));
-        }
-
-        let exports_obj = new_object();
-        let module_obj = new_object();
-        set_object_prop(&module_obj, "exports", exports_obj.clone())?;
-        Env::define(&env, "module", module_obj);
-        Env::define(&env, "exports", exports_obj.clone());
+        let exports_obj =
+            self.bootstrap_env(&env, &resolved.display().to_string(), resolved.parent())?;
 
         let module_dir = resolved
             .parent()
@@ -105,6 +132,32 @@ impl Runtime {
         }
 
         self.module_cache.insert(resolved, exports_obj.clone());
+        Ok(exports_obj)
+    }
+
+    fn bootstrap_env(
+        &self,
+        env: &EnvRef,
+        filename: &str,
+        dirname: Option<&Path>,
+    ) -> Result<Value, String> {
+        Env::define(env, "say", native_wrap(native_say));
+        Env::define(env, "print", native_wrap(native_say));
+        let console_obj = new_object();
+        set_object_prop(&console_obj, "log", native_wrap(native_say)).expect("console.log");
+        set_object_prop(&console_obj, "error", native_wrap(native_console_error))
+            .expect("console.error");
+        Env::define(env, "console", console_obj);
+        Env::define(env, "__filename", Value::from_str(filename));
+        if let Some(parent) = dirname {
+            Env::define(env, "__dirname", Value::from_str(&parent.display().to_string()));
+        }
+
+        let exports_obj = new_object();
+        let module_obj = new_object();
+        set_object_prop(&module_obj, "exports", exports_obj.clone())?;
+        Env::define(env, "module", module_obj);
+        Env::define(env, "exports", exports_obj.clone());
         Ok(exports_obj)
     }
 

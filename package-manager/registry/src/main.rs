@@ -17,6 +17,7 @@ use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{FromRow, Row, SqlitePool};
 use uuid::Uuid;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 const SESSION_COOKIE: &str = "void_session";
 const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
 const INDEX_TEMPLATE: &str = include_str!("../templates/index.html");
@@ -175,6 +176,15 @@ struct UploadedFile {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args()
+        .nth(1)
+        .as_deref()
+        .is_some_and(|arg| matches!(arg, "--version" | "-v"))
+    {
+        println!("{VERSION}");
+        return Ok(());
+    }
+
     log_info("startup", "booting void-registry");
     let addr = env::var("VOID_REGISTRY_ADDR").unwrap_or_else(|_| "127.0.0.1:4090".to_string());
     let public_base_url = env::var("VOID_REGISTRY_PUBLIC_URL")

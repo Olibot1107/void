@@ -71,21 +71,9 @@ if errorlevel 1 (
     color 07
 )
 
-REM Check if Node.js is installed
-node --version >nul 2>&1
-if errorlevel 1 (
-    color 0E
-    echo %WARNING% Node.js is not installed. Some features may not work.
-    color 07
-    set /p "CONTINUE=Continue anyway? (y/n): "
-    if /i not "!CONTINUE!"=="y" (
-        exit /b 1
-    )
-) else (
-    color 0A
-    echo %SUCCESS% Node.js found
-    color 07
-)
+color 0B
+echo %INFO% Node.js is not required. Void and VPM are Rust binaries.
+color 07
 
 echo.
 echo ────────────────────────────────────────
@@ -190,33 +178,23 @@ echo.
 
 cd /d "!VOID_INSTALL_DIR!\void\package-manager"
 
-if exist "package.json" (
+if exist "Cargo.toml" (
     color 0B
-    echo %PROGRESS% Installing npm dependencies...
+    echo %PROGRESS% Compiling Rust package manager binaries...
     color 07
-    call npm install
+    cargo build --release --manifest-path "!VOID_INSTALL_DIR!\void\package-manager\Cargo.toml" -p vpm -p void-registry
     if errorlevel 1 (
         color 0E
-        echo %WARNING% Failed to install npm dependencies
+        echo %WARNING% Package manager build encountered issues
         color 07
     ) else (
-        color 0B
-        echo %PROGRESS% Building package manager...
+        color 0A
+        echo %SUCCESS% Package manager built
         color 07
-        call npm run build
-        if errorlevel 1 (
-            color 0E
-            echo %WARNING% Build script failed
-            color 07
-        ) else (
-            color 0A
-            echo %SUCCESS% Package manager built
-            color 07
-        )
     )
 ) else (
     color 0E
-    echo %WARNING% package.json not found in package-manager directory
+    echo %WARNING% Cargo.toml not found in package-manager directory
     color 07
 )
 
@@ -250,10 +228,10 @@ if exist "!VOID_INSTALL_DIR!\void\language\target\release\void.exe" (
 )
 
 REM Create vpm.bat shortcut
-if exist "!VOID_INSTALL_DIR!\void\package-manager\bin\vpm" (
+if exist "!VOID_INSTALL_DIR!\void\package-manager\target\release\vpm.exe" (
     (
         echo @echo off
-        echo node "!VOID_INSTALL_DIR!\void\package-manager\bin\vpm" %%*
+        echo "!VOID_INSTALL_DIR!\void\package-manager\target\release\vpm.exe" %%*
     ) > "%USERPROFILE%\.void\bin\vpm.bat"
     color 0A
     echo %SUCCESS% 'vpm' command created
@@ -261,6 +239,17 @@ if exist "!VOID_INSTALL_DIR!\void\package-manager\bin\vpm" (
 ) else (
     color 0E
     echo %WARNING% VPM executable not found
+    color 07
+)
+
+REM Create void-registry.bat shortcut
+if exist "!VOID_INSTALL_DIR!\void\package-manager\target\release\void-registry.exe" (
+    (
+        echo @echo off
+        echo "!VOID_INSTALL_DIR!\void\package-manager\target\release\void-registry.exe" %%*
+    ) > "%USERPROFILE%\.void\bin\void-registry.bat"
+    color 0A
+    echo %SUCCESS% 'void-registry' command created
     color 07
 )
 

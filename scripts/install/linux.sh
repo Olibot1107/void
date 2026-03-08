@@ -74,18 +74,7 @@ else
     log_success "Rust found"
 fi
 
-# Check if Node.js is installed
-log_progress "Checking Node.js..."
-if ! command -v node &> /dev/null; then
-    log_warning "Node.js is not installed"
-    read -p "$(echo -e ${CYAN})Continue anyway? (y/n)${NC} " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
-else
-    log_success "Node.js found"
-fi
+log_info "Node.js is not required. Void and VPM build from Rust only."
 
 log_separator
 
@@ -137,16 +126,12 @@ log_separator
 log_step "Building package manager (VPM)"
 cd package-manager
 
-if [ -f "package.json" ]; then
-    log_progress "Installing npm dependencies..."
-    npm install --silent 2>&1 | tail -1
-    log_success "Dependencies installed"
-    
-    log_progress "Building package manager..."
-    npm run build --silent 2>&1 | tail -1 || true
+if [ -f "Cargo.toml" ]; then
+    log_progress "Compiling Rust package manager binaries..."
+    cargo build --release --manifest-path "$INSTALL_DIR/void/package-manager/Cargo.toml" -p vpm -p void-registry 2>&1 | grep -E "Compiling|Finished" || true
     log_success "Package manager built"
 else
-    log_warning "package.json not found in package-manager directory"
+    log_warning "Cargo.toml not found in package-manager directory"
 fi
 
 cd "$INSTALL_DIR/void"
@@ -167,10 +152,17 @@ else
 fi
 
 # Create vpm executable symlink
-VPM_BIN=$(find package-manager -name "vpm" -type f 2>/dev/null | head -1)
-if [ ! -z "$VPM_BIN" ]; then
-    ln -sf "$INSTALL_DIR/void/$VPM_BIN" "$HOME/.local/bin/vpm"
+if [ -f "$INSTALL_DIR/void/package-manager/bin/vpm" ]; then
+    ln -sf "$INSTALL_DIR/void/package-manager/bin/vpm" "$HOME/.local/bin/vpm"
     log_success "'vpm' command linked"
+else
+    log_warning "vpm launcher not found"
+fi
+
+# Create registry executable symlink
+if [ -f "$INSTALL_DIR/void/package-manager/bin/void-registry" ]; then
+    ln -sf "$INSTALL_DIR/void/package-manager/bin/void-registry" "$HOME/.local/bin/void-registry"
+    log_success "'void-registry' command linked"
 fi
 
 # Expose examples at a stable path for docs/quick-start commands.

@@ -18,7 +18,7 @@ curl -sSL https://raw.githubusercontent.com/Olibot1107/void/refs/heads/main/scri
 cd ~/.local/void/void
 git pull origin main
 cd language && cargo build --release
-cd ../package-manager && npm install && npm run build
+cd ../package-manager && cargo build --release -p vpm -p void-registry
 ```
 
 #### Option 3: Custom installation directory
@@ -42,8 +42,7 @@ git pull origin main
 cd language
 cargo build --release
 cd ..\package-manager
-npm install
-npm run build
+cargo build --release -p vpm -p void-registry
 ```
 
 #### Option 3: Custom installation directory
@@ -70,7 +69,7 @@ The update script automatically:
 
 - **Git** - for pulling latest changes
 - **Rust** - for building the runtime (should already be installed)
-- **Node.js** - for building the package manager (should already be installed)
+- **Node.js** - not required
 
 ---
 
@@ -80,6 +79,8 @@ Before updating, check your current version:
 
 ```bash
 void --version
+vpm --version
+~/.local/void/void/package-manager/bin/void-registry --version
 ```
 
 Or see what's new in the repository:
@@ -102,6 +103,8 @@ void ~/.local/void/void/language/examples/hyperdrive.void
 
 # Test the package manager
 vpm --help
+vpm --version
+~/.local/void/void/package-manager/bin/void-registry --version
 ```
 
 ---
@@ -136,9 +139,8 @@ cd language
 cargo clean
 cargo build --release
 cd ../package-manager
-rm -rf node_modules
-npm install
-npm run build
+cargo clean
+cargo build --release -p vpm -p void-registry
 ```
 
 ### Build Errors
@@ -150,15 +152,10 @@ If you encounter build errors:
 rustup update
 ```
 
-2. Check Node.js version:
+2. Rebuild package-manager binaries:
 ```bash
-node --version
-npm --version
-```
-
-3. Clear npm cache:
-```bash
-npm cache clean --force
+cd ~/.local/void/void/package-manager
+cargo build --release -p vpm -p void-registry
 ```
 
 ### Command Not Working After Update
@@ -205,7 +202,7 @@ git checkout <commit-hash>
 
 # Rebuild
 cd language && cargo build --release
-cd ../package-manager && npm install && npm run build
+cd ../package-manager && cargo build --release -p vpm -p void-registry
 ```
 
 ---
@@ -257,12 +254,9 @@ If you need to update dependencies separately:
 # Update Rust toolchain
 rustup update
 
-# Update npm packages
+# Rebuild package manager binaries
 cd ~/.local/void/void/package-manager
-npm update
-
-# Update Node.js
-# Visit https://nodejs.org for the latest version
+cargo build --release -p vpm -p void-registry
 ```
 
 ---

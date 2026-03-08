@@ -56,11 +56,11 @@ install.bat
 ## What Gets Installed
 
 The installer automatically:
-- Checks for required dependencies (Git, Rust, Node.js)
+- Checks for required dependencies (Git, Rust)
 - Installs Rust if missing
 - Clones the Void repository
 - Builds the language runtime
-- Builds the VPM package manager
+- Builds the VPM package manager (Rust binaries)
 - Creates command-line shortcuts
 - Updates system PATH
 - Verifies the installation
@@ -71,7 +71,7 @@ The installer automatically:
 
 - **Git** - for cloning the repository
 - **Rust** - required for building (auto-installed if missing)
-- **Node.js** (optional) - for package manager features
+- **Node.js** - not required
 
 ---
 
@@ -110,9 +110,14 @@ vpm init my_project
 
 # Search packages
 vpm search util --registry http://127.0.0.1:4090
+
+# Check versions
+void --version
+vpm --version
 ```
 
-`vpm` now defaults to install mode help when run without arguments.
+Running `vpm` with no arguments now shows the default VPM help screen.
+For install-specific help, use `vpm install --help`.
 
 ---
 

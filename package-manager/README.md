@@ -1,6 +1,6 @@
 # Void Package Manager
 
-This folder contains an npm-like package ecosystem for Void:
+This folder contains a Rust-native package ecosystem for Void (npm-inspired workflow, no Node.js runtime requirement):
 
 - `registry/`: web registry + HTTP API with account login and authenticated publishing
 - `registry/templates/index.html`: website HTML template (not hardcoded in Rust)
@@ -48,7 +48,8 @@ vpm
 vpm init
 ```
 
-Running `vpm` with no arguments now opens install-focused help (`install` mode by default).
+Running `vpm` with no arguments now shows the default VPM help screen.
+For install-specific help, use `vpm install --help`.
 Server mode is only used when you explicitly run `vpm server`.
 
 If you use the repo launcher directly, keep it pointed at
@@ -98,6 +99,13 @@ Logout:
 
 ```bash
 vpm logout --registry http://127.0.0.1:4090
+```
+
+Check versions:
+
+```bash
+vpm --version
+./bin/void-registry --version
 ```
 
 Install and search stay public:

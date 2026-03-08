@@ -29,15 +29,22 @@ cargo build --release
 ## Run
 
 ```bash
+./void
 ./void ./examples/hello.void
 ./void ./examples/main.void
-./void ./examples/nodeish.void arg1 arg2
 ./void ./examples/app
 ./void ./examples/void_native.void
 ./void ./examples/hyperdrive.void
 ```
 
 The `./void` launcher auto-rebuilds when source changes.
+
+Running `./void` with no arguments starts the native Void REPL:
+
+- color prompt
+- `.help`, `.exit`, `.quit`, `.clear`
+- expression result printing
+- persistent variables/functions between lines
 
 ## Syntax sample
 

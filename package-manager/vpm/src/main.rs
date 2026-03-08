@@ -7,7 +7,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
-use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use flate2::read::GzDecoder;
 use reqwest::blocking::multipart::{Form as MultipartForm, Part};
 use reqwest::blocking::Client;
@@ -48,7 +48,11 @@ impl Loader {
 }
 
 #[derive(Parser)]
-#[command(name = "vpm", about = "Void Package Manager")]
+#[command(
+    name = "vpm",
+    version = env!("CARGO_PKG_VERSION"),
+    about = "Void Package Manager"
+)]
 struct Cli {
     #[arg(short, long, global = true, action = ArgAction::SetTrue)]
     verbose: bool,
@@ -427,7 +431,7 @@ fn main() {
             out_dir.as_deref(),
         ),
         None => {
-            print_install_help();
+            print_default_help();
             Ok(())
         }
     };
@@ -438,26 +442,66 @@ fn main() {
     }
 }
 
-fn print_install_help() {
-    println!("{}", paint("vpm default mode: install", "1;36", false));
+fn print_default_help() {
+    println!("{}", paint("Void Package Manager", "1;36", false));
+    println!("{}", muted(&format!("version {}", env!("CARGO_PKG_VERSION"))));
     println!();
 
-    let mut command = Cli::command();
-    if let Some(install) = command.find_subcommand_mut("install") {
-        if install.print_long_help().is_ok() {
-            println!();
-            return;
-        }
-    }
+    println!("{}", paint("Usage", "1;36", false));
+    println!("  vpm <command> [options]");
+    println!("  vpm --help");
+    println!();
 
-    println!("Usage: vpm install <name> [--version <VERSION>] [--registry <URL>]");
-    println!("Example: vpm install my_pkg --registry {DEFAULT_REGISTRY}");
-    println!(
-        "Other useful commands: vpm info <name>, vpm list, vpm uninstall <name>, vpm clean"
-    );
-    println!("Auth commands: vpm login <username> <password>, vpm logout, vpm whoami");
-    println!("Diagnostics: vpm doctor [--registry <URL>]");
-    println!("Output controls: --verbose, --color <auto|always|never>");
+    println!("{}", paint("Commands", "1;36", false));
+    println!("  init        Create a new voidpkg.toml in this directory");
+    println!("  install     Install a package from the registry");
+    println!("  uninstall   Remove a package (aliases: remove, delete, rm)");
+    println!("  info        Show package details");
+    println!("  search      Search packages by text");
+    println!("  list        Show installed packages");
+    println!("  publish     Publish current package");
+    println!("  npm-import  Convert npm package to Void package");
+    println!("  doctor      Check environment and registry health");
+    println!("  server      Start the registry server wrapper");
+    println!();
+
+    println!("{}", paint("Global Options", "1;36", false));
+    println!("  -h, --help                     Show help");
+    println!("  --version                      Show vpm version");
+    println!("  -v, --verbose                  Enable verbose logs");
+    println!("  --color <auto|always|never>    Control ANSI color output");
+    println!();
+
+    println!("Install command help: vpm install --help");
+    println!("Full command help:    vpm --help");
+}
+
+fn print_install_help() {
+    println!("{}", paint("vpm install", "1;36", false));
+    println!();
+    println!("{}", paint("Usage", "1;36", false));
+    println!("  vpm install <name> [--version <VERSION>] [--registry <URL>]");
+    println!();
+
+    println!("{}", paint("Quick Commands", "1;36", false));
+    println!("  install      vpm install <name> [--version <VERSION>] [--registry <URL>]");
+    println!("  uninstall    vpm uninstall <name>  (aliases: remove, delete, rm)");
+    println!("  info         vpm info <name> [--version <VERSION>] [--readme]");
+    println!("  list         vpm list");
+    println!("  clean        vpm clean [--all|--lock|--imports|--cache]");
+    println!("  doctor       vpm doctor [--registry <URL>]");
+    println!("  server       vpm server");
+    println!();
+    println!("{}", paint("Auth Commands", "1;36", false));
+    println!("  vpm login <username> <password> [--registry <URL>]");
+    println!("  vpm logout [--registry <URL>]");
+    println!("  vpm whoami [--registry <URL>]");
+    println!();
+    println!("{}", paint("Output Controls", "1;36", false));
+    println!("  --verbose");
+    println!("  --color <auto|always|never>");
+    println!();
+    println!("Full command list: vpm --help");
 }
 
 fn new_http_client() -> Result<Client, String> {

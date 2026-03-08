@@ -110,15 +110,8 @@ log_separator
 log_step "Rebuilding package manager (VPM)"
 cd package-manager
 
-log_progress "Installing npm dependencies..."
-if npm install --silent 2>&1 | tail -1; then
-    log_success "Dependencies installed"
-else
-    log_warning "npm install encountered issues"
-fi
-
-log_progress "Building package manager..."
-if npm run build --silent 2>&1 | tail -1 || true; then
+log_progress "Compiling Rust package manager binaries..."
+if cargo build --release --manifest-path "$INSTALL_DIR/void/package-manager/Cargo.toml" -p vpm -p void-registry 2>&1 | grep -E "Compiling|Finished" || true; then
     log_success "Package manager built"
 else
     log_warning "Build completed with issues"

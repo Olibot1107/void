@@ -2,7 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BIN_PATH="$ROOT_DIR/target/release/void"
+CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+DEFAULT_TARGET_DIR="$CACHE_HOME/void-rs-target"
+TARGET_DIR="${CARGO_TARGET_DIR:-$DEFAULT_TARGET_DIR}"
+BIN_PATH="$TARGET_DIR/release/void"
 NEEDS_BUILD=0
 WATCH_PATHS=(
   "$ROOT_DIR/src"
@@ -25,6 +28,8 @@ if [[ "$NEEDS_BUILD" -eq 1 ]]; then
     echo "Install Rust and run: cargo build --release" >&2
     exit 1
   fi
+  mkdir -p "$TARGET_DIR"
+  export CARGO_TARGET_DIR="$TARGET_DIR"
   echo "Building Void runtime (one-time)..." >&2
   cargo build --release --manifest-path "$ROOT_DIR/Cargo.toml" >/dev/null
   touch "$BIN_PATH" >/dev/null 2>&1 || true
