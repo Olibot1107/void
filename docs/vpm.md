@@ -24,7 +24,18 @@ vpm init my_project
 vpm search util --registry http://127.0.0.1:4090
 vpm install some_pkg --registry http://127.0.0.1:4090
 vpm info some_pkg --registry http://127.0.0.1:4090
-vpm remove some_pkg
+vpm uninstall some_pkg
+# aliases: vpm remove some_pkg / vpm delete some_pkg / vpm rm some_pkg
+```
+
+## Maintenance / diagnostics
+
+```bash
+vpm clean
+vpm clean --all
+vpm doctor
+vpm --verbose install some_pkg
+vpm --color always info some_pkg
 ```
 
 ## Auth flow

@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
-use std::io::Cursor;
+use std::io::{self, Cursor, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::time::{Duration, Instant};
 
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use flate2::read::GzDecoder;
 use reqwest::blocking::multipart::{Form as MultipartForm, Part};
 use reqwest::blocking::Client;
@@ -14,10 +15,45 @@ use serde::{Deserialize, Serialize};
 use tar::Archive;
 
 const DEFAULT_REGISTRY: &str = "http://127.0.0.1:4090";
+static VPM_VERBOSE: AtomicBool = AtomicBool::new(false);
+static VPM_COLOR_MODE: AtomicU8 = AtomicU8::new(ColorMode::Auto as u8);
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ColorMode {
+    Auto = 0,
+    Always = 1,
+    Never = 2,
+}
+
+struct Loader {
+    label: String,
+    start: Instant,
+}
+
+impl Loader {
+    fn start(label: impl Into<String>) -> Self {
+        let label = label.into();
+        println!("{} {}", icon_loader(), label);
+        Self {
+            label,
+            start: Instant::now(),
+        }
+    }
+
+    fn done(self) {
+        let elapsed = format_elapsed(self.start.elapsed());
+        println!("{} {} {}", icon_success(), self.label, muted(&format!("({elapsed})")));
+    }
+}
 
 #[derive(Parser)]
 #[command(name = "vpm", about = "Void Package Manager")]
 struct Cli {
+    #[arg(short, long, global = true, action = ArgAction::SetTrue)]
+    verbose: bool,
+    #[arg(long, global = true, value_enum, default_value_t = ColorMode::Auto)]
+    color: ColorMode,
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -66,8 +102,23 @@ enum Commands {
         readme: bool,
     },
     List,
-    Remove {
+    #[command(visible_aliases = ["remove", "delete", "rm"])]
+    Uninstall {
         name: String,
+    },
+    Clean {
+        #[arg(long)]
+        lock: bool,
+        #[arg(long)]
+        cache: bool,
+        #[arg(long)]
+        imports: bool,
+        #[arg(long)]
+        all: bool,
+    },
+    Doctor {
+        #[arg(long, default_value = DEFAULT_REGISTRY)]
+        registry: String,
     },
     Install {
         name: Option<String>,
@@ -197,8 +248,123 @@ struct NpmImportCacheResult {
     converted_units: usize,
 }
 
+fn set_cli_runtime_config(verbose: bool, color: ColorMode) {
+    VPM_VERBOSE.store(verbose, Ordering::Relaxed);
+    VPM_COLOR_MODE.store(color as u8, Ordering::Relaxed);
+}
+
+fn verbose_enabled() -> bool {
+    VPM_VERBOSE.load(Ordering::Relaxed)
+}
+
+fn color_mode() -> ColorMode {
+    match VPM_COLOR_MODE.load(Ordering::Relaxed) {
+        1 => ColorMode::Always,
+        2 => ColorMode::Never,
+        _ => ColorMode::Auto,
+    }
+}
+
+fn use_color(stderr: bool) -> bool {
+    match color_mode() {
+        ColorMode::Always => true,
+        ColorMode::Never => false,
+        ColorMode::Auto => {
+            if std::env::var_os("NO_COLOR").is_some() {
+                return false;
+            }
+            if matches!(std::env::var("CLICOLOR_FORCE").ok().as_deref(), Some("1")) {
+                return true;
+            }
+            if matches!(std::env::var("CLICOLOR").ok().as_deref(), Some("0")) {
+                return false;
+            }
+            if stderr {
+                io::stderr().is_terminal()
+            } else {
+                io::stdout().is_terminal()
+            }
+        }
+    }
+}
+
+fn paint(text: &str, ansi_code: &str, stderr: bool) -> String {
+    if use_color(stderr) {
+        format!("\x1b[{ansi_code}m{text}\x1b[0m")
+    } else {
+        text.to_string()
+    }
+}
+
+fn muted(text: &str) -> String {
+    paint(text, "2", false)
+}
+
+fn icon_success() -> String {
+    paint("✓", "1;32", false)
+}
+
+fn icon_info() -> String {
+    paint("ℹ", "1;36", false)
+}
+
+fn icon_warn() -> String {
+    paint("⚠", "1;33", false)
+}
+
+fn icon_error() -> String {
+    paint("✗", "1;31", true)
+}
+
+fn icon_loader() -> String {
+    paint("⟳", "1;34", false)
+}
+
+fn log_success(message: &str) {
+    println!("{} {}", icon_success(), message);
+}
+
+fn log_info(message: &str) {
+    println!("{} {}", icon_info(), message);
+}
+
+fn log_warn(message: &str) {
+    println!("{} {}", icon_warn(), message);
+}
+
+fn log_error(message: &str) {
+    eprintln!("{} {}", icon_error(), paint(message, "31", true));
+}
+
+fn log_verbose(message: &str) {
+    if verbose_enabled() {
+        println!("{} {}", paint("›", "2;36", false), paint(message, "2;36", false));
+    }
+}
+
+fn format_elapsed(duration: Duration) -> String {
+    if duration.as_secs_f64() < 1.0 {
+        format!("{}ms", duration.as_millis())
+    } else {
+        format!("{:.2}s", duration.as_secs_f64())
+    }
+}
+
+fn command_exists(name: &str) -> bool {
+    Command::new(name)
+        .arg("--version")
+        .output()
+        .map(|out| out.status.success())
+        .unwrap_or(false)
+}
+
 fn main() {
     let cli = Cli::parse();
+    set_cli_runtime_config(cli.verbose, cli.color);
+    if cli.verbose {
+        log_verbose("verbose mode enabled");
+    }
+
     let result = match cli.command {
         Some(Commands::Init { name }) => cmd_init(name),
         Some(Commands::Publish {
@@ -222,7 +388,14 @@ fn main() {
             readme,
         }) => cmd_info(&registry, &name, version.as_deref(), readme),
         Some(Commands::List) => cmd_list(),
-        Some(Commands::Remove { name }) => cmd_remove(&name),
+        Some(Commands::Uninstall { name }) => cmd_uninstall(&name),
+        Some(Commands::Clean {
+            lock,
+            cache,
+            imports,
+            all,
+        }) => cmd_clean(lock, cache, imports, all),
+        Some(Commands::Doctor { registry }) => cmd_doctor(&registry),
         Some(Commands::Install {
             name,
             version,
@@ -260,13 +433,13 @@ fn main() {
     };
 
     if let Err(err) = result {
-        eprintln!("vpm error: {err}");
+        log_error(&format!("vpm error: {err}"));
         std::process::exit(1);
     }
 }
 
 fn print_install_help() {
-    println!("vpm default mode: install");
+    println!("{}", paint("vpm default mode: install", "1;36", false));
     println!();
 
     let mut command = Cli::command();
@@ -279,11 +452,16 @@ fn print_install_help() {
 
     println!("Usage: vpm install <name> [--version <VERSION>] [--registry <URL>]");
     println!("Example: vpm install my_pkg --registry {DEFAULT_REGISTRY}");
-    println!("Other useful commands: vpm info <name>, vpm list, vpm remove <name>");
+    println!(
+        "Other useful commands: vpm info <name>, vpm list, vpm uninstall <name>, vpm clean"
+    );
     println!("Auth commands: vpm login <username> <password>, vpm logout, vpm whoami");
+    println!("Diagnostics: vpm doctor [--registry <URL>]");
+    println!("Output controls: --verbose, --color <auto|always|never>");
 }
 
 fn new_http_client() -> Result<Client, String> {
+    log_verbose("creating HTTP client with 8s connect / 45s request timeout");
     Client::builder()
         .connect_timeout(Duration::from_secs(8))
         .timeout(Duration::from_secs(45))
@@ -314,7 +492,7 @@ fn cmd_init(name: Option<String>) -> Result<(), String> {
     );
 
     fs::write(&manifest_path, content).map_err(|e| e.to_string())?;
-    println!("Created {}", manifest_path.display());
+    log_success(&format!("Created {}", manifest_path.display()));
     Ok(())
 }
 
@@ -324,7 +502,12 @@ fn cmd_login(registry: &str, username: &str, password: &str) -> Result<(), Strin
     }
 
     let client = new_http_client()?;
+    let loader = Loader::start(format!(
+        "Authenticating with {}",
+        normalize_registry(registry)
+    ));
     let url = format!("{}/api/login", normalize_registry(registry));
+    log_verbose(&format!("POST {}", url));
     let response = client
         .post(url)
         .json(&serde_json::json!({
@@ -354,20 +537,21 @@ fn cmd_login(registry: &str, username: &str, password: &str) -> Result<(), Strin
         .unwrap_or(username.trim());
 
     save_auth_session(registry, confirmed_user, token)?;
-    println!(
+    loader.done();
+    log_success(&format!(
         "Logged in as '{}' for {}",
         confirmed_user,
         normalize_registry(registry)
-    );
-    println!("Saved auth at {}", auth_store_path().display());
+    ));
+    log_info(&format!("Saved auth at {}", auth_store_path().display()));
     Ok(())
 }
 
 fn cmd_logout(registry: &str) -> Result<(), String> {
     if remove_auth_session(registry)? {
-        println!("Logged out from {}", normalize_registry(registry));
+        log_success(&format!("Logged out from {}", normalize_registry(registry)));
     } else {
-        println!("No saved login for {}", normalize_registry(registry));
+        log_warn(&format!("No saved login for {}", normalize_registry(registry)));
     }
     Ok(())
 }
@@ -375,12 +559,12 @@ fn cmd_logout(registry: &str) -> Result<(), String> {
 fn cmd_whoami(registry: &str) -> Result<(), String> {
     let session = load_auth_session(registry)?;
     if let Some(session) = session {
-        println!(
+        log_success(&format!(
             "Logged in as '{}' for {}",
             session.username,
             normalize_registry(registry)
-        );
-        println!("Saved at {}", session.saved_at);
+        ));
+        log_info(&format!("Saved at {}", session.saved_at));
         return Ok(());
     }
 
@@ -427,9 +611,12 @@ fn cmd_publish(
     })?;
 
     let client = new_http_client()?;
+    let loader = Loader::start(format!("Publishing {}@{}", payload.name, payload.version));
     let api = if let Some(path) = file {
+        log_verbose(&format!("publishing multipart file '{}'", path.display()));
         publish_multipart(&client, registry, Some(token_owned.as_str()), &payload, path)?
     } else {
+        log_verbose("publishing JSON payload");
         publish_json(&client, registry, Some(token_owned.as_str()), &payload)?
     };
 
@@ -437,7 +624,8 @@ fn cmd_publish(
         return Err(api.message);
     }
 
-    println!("Published {}@{}", payload.name, payload.version);
+    loader.done();
+    log_success(&format!("Published {}@{}", payload.name, payload.version));
     Ok(())
 }
 
@@ -448,6 +636,7 @@ fn publish_json(
     payload: &PublishPayload,
 ) -> Result<ApiMessage, String> {
     let url = format!("{}/api/publish", normalize_registry(registry));
+    log_verbose(&format!("POST {}", url));
     let mut request = client.post(url).json(payload);
     if let Some(token) = token {
         request = request.bearer_auth(token);
@@ -470,6 +659,7 @@ fn publish_npm_import_guest(
     payload: &PublishPayload,
 ) -> Result<ApiMessage, String> {
     let url = format!("{}/api/publish/npm-import", normalize_registry(registry));
+    log_verbose(&format!("POST {}", url));
     let response = client
         .post(url)
         .json(payload)
@@ -493,6 +683,7 @@ fn publish_multipart(
     file: &Path,
 ) -> Result<ApiMessage, String> {
     let url = format!("{}/api/publish/upload", normalize_registry(registry));
+    log_verbose(&format!("POST {} (multipart)", url));
     let file_name = file
         .file_name()
         .and_then(|s| s.to_str())
@@ -530,6 +721,8 @@ fn publish_multipart(
 fn cmd_search(registry: &str, query: &str) -> Result<(), String> {
     let client = new_http_client()?;
     let url = format!("{}/api/search", normalize_registry(registry));
+    let loader = Loader::start(format!("Searching '{}' on {}", query, normalize_registry(registry)));
+    log_verbose(&format!("GET {}?q={}", url, query));
 
     let response = client
         .get(url)
@@ -542,16 +735,20 @@ fn cmd_search(registry: &str, query: &str) -> Result<(), String> {
     }
 
     let packages: Vec<PackageSummary> = response.json().map_err(|e| e.to_string())?;
+    loader.done();
 
     if packages.is_empty() {
-        println!("No packages found for '{query}'");
+        log_warn(&format!("No packages found for '{query}'"));
         return Ok(());
     }
 
     for pkg in packages {
         println!(
-            "{}@{} - {} (author: {}, downloads: {})",
-            pkg.name, pkg.version, pkg.description, pkg.author, pkg.downloads
+            "{} - {} (author: {}, downloads: {})",
+            paint(&format!("{}@{}", pkg.name, pkg.version), "1;36", false),
+            pkg.description,
+            pkg.author,
+            pkg.downloads
         );
     }
 
@@ -562,7 +759,9 @@ fn cmd_info(registry: &str, name: &str, version: Option<&str>, readme: bool) -> 
     validate_package_name(name)?;
 
     let client = new_http_client()?;
+    let loader = Loader::start(format!("Fetching metadata for {}", name));
     let versions = fetch_registry_package_versions(&client, registry, name)?;
+    loader.done();
     if versions.is_empty() {
         return Err(format!("Package '{name}' not found"));
     }
@@ -578,7 +777,7 @@ fn cmd_info(registry: &str, name: &str, version: Option<&str>, readme: bool) -> 
             .ok_or_else(|| format!("Package '{name}' not found"))?
     };
 
-    println!("{}@{}", selected.name, selected.version);
+    println!("{}", paint(&format!("{}@{}", selected.name, selected.version), "1;36", false));
     println!("author: {}", selected.author);
     println!("downloads: {}", selected.downloads);
     println!("published: {}", selected.created_at);
@@ -615,7 +814,7 @@ fn cmd_info(registry: &str, name: &str, version: Option<&str>, readme: bool) -> 
             println!("\nREADME:\n{}", selected.readme);
         }
     } else {
-        println!("hint: pass --readme to print the README");
+        log_info("hint: pass --readme to print the README");
     }
 
     Ok(())
@@ -624,7 +823,7 @@ fn cmd_info(registry: &str, name: &str, version: Option<&str>, readme: bool) -> 
 fn cmd_list() -> Result<(), String> {
     let lock = read_lockfile_or_default(Path::new("void.lock"))?;
     if lock.packages.is_empty() {
-        println!("No packages in void.lock");
+        log_warn("No packages in void.lock");
         return Ok(());
     }
 
@@ -634,7 +833,11 @@ fn cmd_list() -> Result<(), String> {
     for name in names {
         if let Some(pkg) = lock.packages.get(&name) {
             let installed = PathBuf::from("void_modules").join(&name).exists();
-            let status = if installed { "installed" } else { "missing" };
+            let status = if installed {
+                paint("installed", "1;32", false)
+            } else {
+                paint("missing", "1;33", false)
+            };
             println!(
                 "{}@{} [{}] registry={}",
                 name, pkg.version, status, pkg.registry
@@ -644,14 +847,14 @@ fn cmd_list() -> Result<(), String> {
     Ok(())
 }
 
-fn cmd_remove(name: &str) -> Result<(), String> {
+fn cmd_uninstall(name: &str) -> Result<(), String> {
     validate_package_name(name)?;
 
     let mut removed_any = false;
     let module_dir = PathBuf::from("void_modules").join(name);
     if module_dir.exists() {
         remove_dir_tree(&module_dir)?;
-        println!("Removed {}", module_dir.display());
+        log_success(&format!("Removed {}", module_dir.display()));
         removed_any = true;
     }
 
@@ -659,7 +862,7 @@ fn cmd_remove(name: &str) -> Result<(), String> {
     let mut lock = read_lockfile_or_default(lock_path)?;
     if lock.packages.remove(name).is_some() {
         write_lockfile(lock_path, &lock)?;
-        println!("Removed {name} from void.lock");
+        log_success(&format!("Removed {name} from void.lock"));
         removed_any = true;
     }
 
@@ -670,10 +873,130 @@ fn cmd_remove(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn cmd_clean(lock: bool, cache: bool, imports: bool, all: bool) -> Result<(), String> {
+    let remove_lock = all || lock;
+    let remove_cache = all || cache;
+    let remove_imports = all || imports;
+    let mut removed_any = false;
+
+    let modules_dir = Path::new("void_modules");
+    if modules_dir.exists() {
+        remove_dir_tree(modules_dir)?;
+        log_success("Removed void_modules");
+        removed_any = true;
+    } else {
+        log_verbose("void_modules not present");
+    }
+
+    if remove_imports {
+        let imports_dir = Path::new("vpm-imports");
+        if imports_dir.exists() {
+            remove_dir_tree(imports_dir)?;
+            log_success("Removed vpm-imports");
+            removed_any = true;
+        } else {
+            log_verbose("vpm-imports not present");
+        }
+    }
+
+    if remove_lock {
+        let lock_path = Path::new("void.lock");
+        if lock_path.exists() {
+            fs::remove_file(lock_path).map_err(|e| e.to_string())?;
+            log_success("Removed void.lock");
+            removed_any = true;
+        } else {
+            log_verbose("void.lock not present");
+        }
+    }
+
+    if remove_cache {
+        let cache_root = npm_import_cache_root();
+        if cache_root.exists() {
+            remove_dir_tree(&cache_root)?;
+            log_success(&format!("Removed npm import cache {}", cache_root.display()));
+            removed_any = true;
+        } else {
+            log_verbose("npm import cache not present");
+        }
+    }
+
+    if !removed_any {
+        log_warn("Nothing to clean");
+        return Ok(());
+    }
+
+    if !(remove_lock || remove_cache || remove_imports) {
+        log_info("Tip: add --all to clean lock, cache, and vpm-imports too.");
+    }
+    Ok(())
+}
+
+fn cmd_doctor(registry: &str) -> Result<(), String> {
+    log_info("Running vpm diagnostics");
+    let mut issues = 0usize;
+
+    if command_exists("cargo") {
+        log_success("cargo: found");
+    } else {
+        log_warn("cargo: not found in PATH");
+        issues += 1;
+    }
+
+    if command_exists("git") {
+        log_success("git: found");
+    } else {
+        log_warn("git: not found in PATH");
+        issues += 1;
+    }
+
+    let lock_path = Path::new("void.lock");
+    if lock_path.exists() {
+        log_success(&format!("lockfile: {}", lock_path.display()));
+    } else {
+        log_info("lockfile: void.lock missing (expected for new projects)");
+    }
+
+    let modules_dir = Path::new("void_modules");
+    if modules_dir.exists() {
+        log_success("void_modules: present");
+    } else {
+        log_info("void_modules: missing (run vpm install <name> to create)");
+    }
+
+    let client = new_http_client()?;
+    let loader = Loader::start(format!("Checking registry {}", normalize_registry(registry)));
+    let ping_url = format!("{}/api/packages", normalize_registry(registry));
+    log_verbose(&format!("GET {}", ping_url));
+    let ping_result = client.get(ping_url).send();
+    loader.done();
+    match ping_result {
+        Ok(resp) if resp.status().is_success() => {
+            log_success("registry: reachable");
+        }
+        Ok(resp) => {
+            issues += 1;
+            log_warn(&format!("registry: status {}", resp.status()));
+        }
+        Err(err) => {
+            issues += 1;
+            log_warn(&format!("registry: unreachable ({err})"));
+        }
+    }
+
+    if issues == 0 {
+        log_success("doctor finished with no issues");
+    } else {
+        log_warn(&format!("doctor found {issues} issue(s)"));
+    }
+    Ok(())
+}
+
 fn cmd_install(registry: &str, name: &str, version: Option<&str>) -> Result<(), String> {
     validate_package_name(name)?;
 
     let client = new_http_client()?;
+    let loader = Loader::start(format!("Installing {name}"));
     let selected = if let Some(target_version) = version {
         fetch_registry_package_version(&client, registry, name, target_version)?
     } else {
@@ -697,6 +1020,7 @@ fn cmd_install(registry: &str, name: &str, version: Option<&str>) -> Result<(), 
 
     if !selected.tarball_url.trim().is_empty() {
         let download_url = absolute_url_from_registry(registry, &selected.tarball_url);
+        log_verbose(&format!("GET {}", download_url));
         if let Ok(resp) = client.get(&download_url).send()
             && resp.status().is_success()
             && let Ok(bytes) = resp.bytes()
@@ -714,8 +1038,9 @@ fn cmd_install(registry: &str, name: &str, version: Option<&str>) -> Result<(), 
         &selected.github_repo,
     )?;
 
-    println!("Installed {}@{}", selected.name, selected.version);
-    println!("Saved metadata at {}", metadata_path.display());
+    loader.done();
+    log_success(&format!("Installed {}@{}", selected.name, selected.version));
+    log_info(&format!("Saved metadata at {}", metadata_path.display()));
     Ok(())
 }
 
@@ -725,6 +1050,7 @@ fn fetch_registry_package_versions(
     name: &str,
 ) -> Result<Vec<PackageVersion>, String> {
     let url = format!("{}/api/packages/{}", normalize_registry(registry), name);
+    log_verbose(&format!("GET {}", url));
     let response = client.get(url).send().map_err(|e| e.to_string())?;
     if !response.status().is_success() {
         return Err(format!("Registry returned status {}", response.status()));
@@ -744,6 +1070,7 @@ fn fetch_registry_package_version(
         name,
         version
     );
+    log_verbose(&format!("GET {}", url));
     let response = client.get(url).send().map_err(|e| e.to_string())?;
     if !response.status().is_success() {
         return Err(format!("Registry returned status {}", response.status()));
@@ -786,6 +1113,10 @@ fn cmd_npm_import(
 
     let client = new_http_client()?;
     let registry_versions = if install {
+        log_info(&format!(
+            "Checking website registry for existing {} versions",
+            void_name
+        ));
         fetch_registry_package_versions(&client, registry, &void_name).map_err(|err| {
             format!("Registry API is required for npm-import --install: {err}")
         })?
@@ -795,6 +1126,8 @@ fn cmd_npm_import(
 
     let encoded_name = encode_npm_name(package);
     let metadata_url = format!("https://registry.npmjs.org/{encoded_name}");
+    let metadata_loader = Loader::start(format!("Fetching npm metadata for {}", package));
+    log_verbose(&format!("GET {}", metadata_url));
     let response = client.get(&metadata_url).send().map_err(|e| e.to_string())?;
     if !response.status().is_success() {
         return Err(format!(
@@ -813,14 +1146,14 @@ fn cmd_npm_import(
                     .first()
                     .map(|pkg| pkg.version.clone())
                     .unwrap_or_default();
-                println!(
+                log_info(&format!(
                     "Using website registry version {existing} for {void_name}. Pass --version to override."
-                );
+                ));
                 existing
             } else if let Some(existing) = pinned_version {
-                println!(
+                log_info(&format!(
                     "Using pinned version {existing} from previous import for {package}. Pass --version to change it."
-                );
+                ));
                 existing
             } else {
                 root.dist_tags
@@ -830,6 +1163,7 @@ fn cmd_npm_import(
             }
         }
     };
+    metadata_loader.done();
 
     let version_meta = root
         .versions
@@ -871,9 +1205,15 @@ fn cmd_npm_import(
     }
     fs::create_dir_all(&module_dir).map_err(|e| e.to_string())?;
 
+    let convert_loader = Loader::start(format!(
+        "Converting {}@{} into Void package",
+        package, selected_version
+    ));
     let cache = ensure_npm_import_cache(&client, package, &selected_version, &tarball_url)?;
     if cache.used_cache {
-        println!("Using cached npm conversion for {package}@{selected_version}");
+        log_info(&format!(
+            "Using cached npm conversion for {package}@{selected_version}"
+        ));
     }
 
     let cache_npm_dir = cache.cache_dir.join("npm");
@@ -881,9 +1221,13 @@ fn cmd_npm_import(
     copy_dir_recursive(&cache_npm_dir, &npm_dir)?;
 
     if with_npm_deps {
-        println!("--with-npm-deps ignored (void-only conversion mode)");
+        log_warn("--with-npm-deps ignored (void-only conversion mode)");
     }
-    println!("Converted npm source files to .void units: {}", cache.converted_units);
+    convert_loader.done();
+    log_success(&format!(
+        "Converted npm source files to .void units: {}",
+        cache.converted_units
+    ));
 
     let wrapper = npm_wrapper_script(package, &selected_version, &main_void);
     fs::write(module_dir.join("index.void"), wrapper).map_err(|e| e.to_string())?;
@@ -936,10 +1280,10 @@ fn cmd_npm_import(
             .any(|pkg| pkg.version == selected_version);
 
         if registry_has_version {
-            println!(
+            log_info(&format!(
                 "Website registry already has {}@{} (publish skipped).",
                 void_name, selected_version
-            );
+            ));
         } else {
             let payload = PublishPayload {
                 name: void_name.clone(),
@@ -956,24 +1300,26 @@ fn cmd_npm_import(
             };
 
             let api = if let Some(token_owned) = resolve_auth_token(registry, token)? {
+                log_verbose("using authenticated publish for npm-import install");
                 publish_json(&client, registry, Some(token_owned.as_str()), &payload)?
             } else {
+                log_verbose("using guest npm-import publish endpoint");
                 publish_npm_import_guest(&client, registry, &payload)?
             };
             if api.ok {
-                println!(
+                log_success(&format!(
                     "Published {}@{} to website registry {}",
                     void_name,
                     selected_version,
                     normalize_registry(registry)
-                );
+                ));
             } else {
                 let message_lower = api.message.to_lowercase();
                 if message_lower.contains("unique") {
-                    println!(
+                    log_info(&format!(
                         "Website registry already contains {}@{} (duplicate publish skipped).",
                         void_name, selected_version
-                    );
+                    ));
                 } else {
                     return Err(format!("Website registry publish failed: {}", api.message));
                 }
@@ -989,15 +1335,15 @@ fn cmd_npm_import(
         )?;
     }
 
-    println!("Imported npm package {package}@{selected_version}");
-    println!("Converted to Void package: {void_name}");
-    println!("Converted output: {}", module_dir.display());
+    log_success(&format!("Imported npm package {package}@{selected_version}"));
+    log_info(&format!("Converted to Void package: {void_name}"));
+    log_info(&format!("Converted output: {}", module_dir.display()));
     if install {
-        println!("Installed into void_modules.");
-        println!("Import from Void with: use \"{void_name}\" as pkg");
+        log_success("Installed into void_modules.");
+        log_info(&format!("Import from Void with: use \"{void_name}\" as pkg"));
     } else {
-        println!("Not installed into void_modules (default behavior).");
-        println!("To install directly, run again with: --install");
+        log_info("Not installed into void_modules (default behavior).");
+        log_info("To install directly, run again with: --install");
     }
     Ok(())
 }
@@ -1008,6 +1354,7 @@ fn install_from_github(module_dir: &Path, github_repo: &str) -> Result<(), Strin
         remove_dir_tree(&repo_dir)?;
     }
     let clone_url = normalize_repo_clone_url(github_repo);
+    log_verbose(&format!("cloning source from {}", clone_url));
 
     let result = Command::new("git")
         .arg("clone")
@@ -1020,6 +1367,7 @@ fn install_from_github(module_dir: &Path, github_repo: &str) -> Result<(), Strin
     match result {
         Ok(status) if status.success() => Ok(()),
         _ => {
+            log_warn("git clone failed; writing SOURCE.txt fallback");
             let fallback = module_dir.join("SOURCE.txt");
             fs::write(&fallback, format!("GitHub source: {clone_url}\n"))
                 .map_err(|e| e.to_string())?;

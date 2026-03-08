@@ -109,7 +109,21 @@ vpm install some_pkg --version 1.2.3 --registry http://127.0.0.1:4090
 vpm info some_pkg --registry http://127.0.0.1:4090
 vpm info some_pkg --version 1.2.3 --readme --registry http://127.0.0.1:4090
 vpm list
-vpm remove some_pkg
+vpm uninstall some_pkg
+# aliases:
+# vpm remove some_pkg
+# vpm delete some_pkg
+# vpm rm some_pkg
+```
+
+Maintenance and diagnostics:
+
+```bash
+vpm clean                # remove void_modules
+vpm clean --all          # remove void_modules + vpm-imports + void.lock + npm-import cache
+vpm doctor               # environment + registry checks
+vpm --verbose search util
+vpm --color always info some_pkg
 ```
 
 Convert npm package -> Void/VPM-ready package:
