@@ -87,6 +87,16 @@ run_privileged() {
     fi
 }
 
+load_rust_env() {
+    if [ -f "$HOME/.cargo/env" ]; then
+        # shellcheck disable=SC1090
+        source "$HOME/.cargo/env"
+    fi
+    if [ -x "$HOME/.cargo/bin/rustc" ] && [[ ":$PATH:" != *":$HOME/.cargo/bin:"* ]]; then
+        export PATH="$HOME/.cargo/bin:$PATH"
+    fi
+}
+
 install_git_auto() {
     local os_name
     os_name="$(uname -s)"
@@ -167,6 +177,7 @@ install_c_toolchain_auto() {
 
 # Main script
 log_header "Void Scripting Runtime Installer"
+load_rust_env
 
 # Check if git is installed
 log_step "Checking prerequisites"
@@ -208,10 +219,7 @@ if ! command -v rustc &> /dev/null; then
         fi
         echo -e "${CYAN}Installing Rust...${NC}"
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-        if [ -f "$HOME/.cargo/env" ]; then
-            # shellcheck disable=SC1090
-            source "$HOME/.cargo/env"
-        fi
+        load_rust_env
         if ! command -v rustc &> /dev/null; then
             log_error "Rust installation finished, but rustc is still not in PATH"
             log_info "Open a new shell or source ~/.cargo/env, then run installer again."
