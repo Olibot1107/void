@@ -211,6 +211,14 @@ append("tests pass=" + test.pass + " fail=" + test.fail)
 append("stress iterations=" + stress_iterations + " ms=" + stress_ms + " throughput=" + throughput + "/s")
 append("duration_ms=" + summary.duration_ms)
 
+log_test("")
+log_test("[RESULT] run_id=" + run_id)
+log_test("[RESULT] verdict=" + verdict)
+log_test("[RESULT] average=" + average)
+log_test("[RESULT] tests_pass=" + test.pass + " tests_fail=" + test.fail)
+log_test("[RESULT] stress_iterations=" + stress_iterations + " stress_ms=" + stress_ms + " throughput=" + throughput + "/s")
+log_test("[RESULT] duration_ms=" + summary.duration_ms)
+
 let end_result = ""
 end_result = end_result + "HYPERDRIVE END RESULT\n"
 end_result = end_result + "run_id=" + run_id + "\n"
