@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -53,6 +54,12 @@ enum Commands {
         version: Option<String>,
         #[arg(long = "as")]
         alias: Option<String>,
+        #[arg(long)]
+        install: bool,
+        #[arg(long)]
+        with_npm_deps: bool,
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
     },
 }
 
@@ -126,6 +133,12 @@ struct NpmPackageRoot {
     versions: HashMap<String, serde_json::Value>,
 }
 
+struct NpmImportCacheResult {
+    cache_dir: PathBuf,
+    used_cache: bool,
+    converted_units: usize,
+}
+
 fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
@@ -146,7 +159,17 @@ fn main() {
             package,
             version,
             alias,
-        } => cmd_npm_import(&package, version.as_deref(), alias.as_deref()),
+            install,
+            with_npm_deps,
+            out_dir,
+        } => cmd_npm_import(
+            &package,
+            version.as_deref(),
+            alias.as_deref(),
+            install,
+            with_npm_deps,
+            out_dir.as_deref(),
+        ),
     };
 
     if let Err(err) = result {
@@ -372,7 +395,14 @@ fn cmd_install(registry: &str, name: &str, version: Option<&str>) -> Result<(), 
     Ok(())
 }
 
-fn cmd_npm_import(package: &str, version: Option<&str>, alias: Option<&str>) -> Result<(), String> {
+fn cmd_npm_import(
+    package: &str,
+    version: Option<&str>,
+    alias: Option<&str>,
+    install: bool,
+    with_npm_deps: bool,
+    out_dir: Option<&Path>,
+) -> Result<(), String> {
     if package.trim().is_empty() {
         return Err("Package name cannot be empty".to_string());
     }
@@ -415,6 +445,7 @@ fn cmd_npm_import(package: &str, version: Option<&str>, alias: Option<&str>) -> 
         .get("main")
         .and_then(|v| v.as_str())
         .unwrap_or("index.js");
+    let main_void = npm_main_to_void_path(main_js);
     let description = version_meta
         .get("description")
         .and_then(|v| v.as_str())
@@ -438,28 +469,33 @@ fn cmd_npm_import(package: &str, version: Option<&str>, alias: Option<&str>) -> 
         .unwrap_or_else(|| npm_name_to_void_name(package));
     validate_package_name(&void_name)?;
 
-    let module_dir = PathBuf::from("void_modules").join(&void_name);
+    let module_dir = if install {
+        PathBuf::from("void_modules").join(&void_name)
+    } else if let Some(custom_dir) = out_dir {
+        custom_dir.join(&void_name)
+    } else {
+        PathBuf::from("vpm-imports").join(&void_name)
+    };
     if module_dir.exists() {
         fs::remove_dir_all(&module_dir).map_err(|e| e.to_string())?;
     }
     fs::create_dir_all(&module_dir).map_err(|e| e.to_string())?;
 
-    let tarball_bytes = client
-        .get(&tarball_url)
-        .send()
-        .map_err(|e| format!("Failed to download npm tarball: {e}"))?
-        .bytes()
-        .map_err(|e| format!("Failed to read npm tarball bytes: {e}"))?;
-    let npm_dir = module_dir.join("npm");
-    extract_npm_tarball(&tarball_bytes, &npm_dir)?;
-    let npm_package_dir = npm_dir.join("package");
-    match try_install_npm_dependencies(&npm_package_dir) {
-        Ok(true) => println!("Installed npm dependencies inside {}", npm_package_dir.display()),
-        Ok(false) => println!("Skipped npm dependency install (npm CLI not found)"),
-        Err(err) => println!("Warning: npm dependency install failed: {err}"),
+    let cache = ensure_npm_import_cache(&client, package, &selected_version, &tarball_url)?;
+    if cache.used_cache {
+        println!("Using cached npm conversion for {package}@{selected_version}");
     }
 
-    let wrapper = npm_wrapper_script(package, &selected_version, main_js);
+    let cache_npm_dir = cache.cache_dir.join("npm");
+    let npm_dir = module_dir.join("npm");
+    copy_dir_recursive(&cache_npm_dir, &npm_dir)?;
+
+    if with_npm_deps {
+        println!("--with-npm-deps ignored (void-only conversion mode)");
+    }
+    println!("Converted npm source files to .void units: {}", cache.converted_units);
+
+    let wrapper = npm_wrapper_script(package, &selected_version, &main_void);
     fs::write(module_dir.join("index.void"), wrapper).map_err(|e| e.to_string())?;
 
     let void_manifest = serde_json::json!({
@@ -499,23 +535,31 @@ fn cmd_npm_import(package: &str, version: Option<&str>, alias: Option<&str>) -> 
     fs::write(module_dir.join("voidpkg.toml"), publish_manifest).map_err(|e| e.to_string())?;
 
     let source_note = format!(
-        "This package was converted from npm.\n\nnpm: {}@{}\nentry: {}\n\nUse in Void:\n  use \"{}\" as pkg\n",
-        package, selected_version, main_js, void_name
+        "This package was converted from npm to Void-only format.\n\nnpm: {}@{}\nentry.js: {}\nentry.void: {}\n\nUse in Void:\n  use \"{}\" as pkg\n",
+        package, selected_version, main_js, main_void, void_name
     );
     fs::write(module_dir.join("NPM_IMPORT.txt"), source_note).map_err(|e| e.to_string())?;
 
-    update_lockfile(
-        &void_name,
-        &selected_version,
-        "https://registry.npmjs.org",
-        &tarball_url,
-        &repository,
-    )?;
+    if install {
+        update_lockfile(
+            &void_name,
+            &selected_version,
+            "https://registry.npmjs.org",
+            &tarball_url,
+            &repository,
+        )?;
+    }
 
     println!("Imported npm package {package}@{selected_version}");
     println!("Converted to Void package: {void_name}");
-    println!("Installed at {}", module_dir.display());
-    println!("Import from Void with: use \"{void_name}\" as pkg");
+    println!("Converted output: {}", module_dir.display());
+    if install {
+        println!("Installed into void_modules.");
+        println!("Import from Void with: use \"{void_name}\" as pkg");
+    } else {
+        println!("Not installed into void_modules (default behavior).");
+        println!("To install directly, run again with: --install");
+    }
     Ok(())
 }
 
@@ -612,6 +656,109 @@ fn encode_npm_name(name: &str) -> String {
     name.replace('/', "%2f")
 }
 
+fn sanitize_cache_segment(value: &str) -> String {
+    let mut out = String::new();
+    let mut last_was_sep = false;
+
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
+            out.push(ch.to_ascii_lowercase());
+            last_was_sep = false;
+        } else if !last_was_sep {
+            out.push('_');
+            last_was_sep = true;
+        }
+    }
+
+    let trimmed = out.trim_matches('_');
+    if trimmed.is_empty() {
+        "pkg".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn npm_import_cache_root() -> PathBuf {
+    if let Ok(custom) = std::env::var("VPM_CACHE_DIR")
+        && !custom.trim().is_empty()
+    {
+        return PathBuf::from(custom).join("npm-import");
+    }
+
+    if let Ok(xdg) = std::env::var("XDG_CACHE_HOME")
+        && !xdg.trim().is_empty()
+    {
+        return PathBuf::from(xdg).join("vpm").join("npm-import");
+    }
+
+    if let Ok(home) = std::env::var("HOME")
+        && !home.trim().is_empty()
+    {
+        return PathBuf::from(home)
+            .join(".cache")
+            .join("vpm")
+            .join("npm-import");
+    }
+
+    PathBuf::from(".vpm-cache").join("npm-import")
+}
+
+fn npm_import_cache_dir(package: &str, version: &str) -> PathBuf {
+    npm_import_cache_root()
+        .join(sanitize_cache_segment(package))
+        .join(sanitize_cache_segment(version))
+}
+
+fn ensure_npm_import_cache(
+    client: &Client,
+    package: &str,
+    version: &str,
+    tarball_url: &str,
+) -> Result<NpmImportCacheResult, String> {
+    let cache_dir = npm_import_cache_dir(package, version);
+    let cache_package_dir = cache_dir.join("npm").join("package");
+
+    if cache_package_dir.exists() {
+        let converted_units = count_void_units(&cache_package_dir)?;
+        return Ok(NpmImportCacheResult {
+            cache_dir,
+            used_cache: true,
+            converted_units,
+        });
+    }
+
+    if cache_dir.exists() {
+        fs::remove_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+    }
+    fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+
+    let result = (|| -> Result<usize, String> {
+        let tarball_bytes = client
+            .get(tarball_url)
+            .send()
+            .map_err(|e| format!("Failed to download npm tarball: {e}"))?
+            .bytes()
+            .map_err(|e| format!("Failed to read npm tarball bytes: {e}"))?;
+
+        let npm_dir = cache_dir.join("npm");
+        extract_npm_tarball(&tarball_bytes, &npm_dir)?;
+        let npm_package_dir = npm_dir.join("package");
+        convert_npm_tree_to_void_only(&npm_package_dir)
+    })();
+
+    match result {
+        Ok(converted_units) => Ok(NpmImportCacheResult {
+            cache_dir,
+            used_cache: false,
+            converted_units,
+        }),
+        Err(err) => {
+            let _ = fs::remove_dir_all(&cache_dir);
+            Err(err)
+        }
+    }
+}
+
 fn npm_name_to_void_name(name: &str) -> String {
     let mut out = String::from("npm_");
     let mut last_was_sep = false;
@@ -648,25 +795,128 @@ fn extract_npm_tarball(bytes: &[u8], destination: &Path) -> Result<(), String> {
     archive.unpack(destination).map_err(|e| e.to_string())
 }
 
-fn try_install_npm_dependencies(package_dir: &Path) -> Result<bool, String> {
-    if !package_dir.join("package.json").exists() {
-        return Ok(false);
+fn convert_npm_tree_to_void_only(root: &Path) -> Result<usize, String> {
+    let mut converted = 0usize;
+    let mut stack = vec![root.to_path_buf()];
+
+    while let Some(current) = stack.pop() {
+        let entries = fs::read_dir(&current).map_err(|e| e.to_string())?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+
+            if is_js_like_source(&path) {
+                convert_js_file_to_void_unit(&path, root)?;
+                converted += 1;
+            }
+        }
     }
 
-    let status = Command::new("npm")
-        .arg("install")
-        .arg("--omit=dev")
-        .arg("--legacy-peer-deps")
-        .arg("--no-audit")
-        .arg("--no-fund")
-        .current_dir(package_dir)
-        .status();
+    Ok(converted)
+}
 
-    match status {
-        Ok(result) if result.success() => Ok(true),
-        Ok(result) => Err(format!("npm install exited with status {result}")),
-        Err(_) => Ok(false),
+fn count_void_units(root: &Path) -> Result<usize, String> {
+    let mut count = 0usize;
+    let mut stack = vec![root.to_path_buf()];
+
+    while let Some(current) = stack.pop() {
+        let entries = fs::read_dir(&current).map_err(|e| e.to_string())?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(OsStr::to_str) == Some("void") {
+                count += 1;
+            }
+        }
     }
+
+    Ok(count)
+}
+
+fn copy_dir_recursive(source: &Path, destination: &Path) -> Result<(), String> {
+    if destination.exists() {
+        fs::remove_dir_all(destination).map_err(|e| e.to_string())?;
+    }
+    fs::create_dir_all(destination).map_err(|e| e.to_string())?;
+
+    for entry in fs::read_dir(source).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let src_path = entry.path();
+        let dest_path = destination.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dest_path)?;
+        } else {
+            fs::copy(&src_path, &dest_path).map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
+fn is_js_like_source(path: &Path) -> bool {
+    let file_name = path.file_name().and_then(OsStr::to_str).unwrap_or_default();
+    if file_name.ends_with(".d.ts") {
+        return true;
+    }
+
+    matches!(
+        path.extension().and_then(OsStr::to_str),
+        Some("js" | "mjs" | "cjs" | "ts" | "mts" | "cts" | "jsx" | "tsx")
+    )
+}
+
+fn convert_js_file_to_void_unit(path: &Path, root: &Path) -> Result<(), String> {
+    let source = fs::read_to_string(path).unwrap_or_default();
+    let relative = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    let line_count = source.lines().count();
+    let byte_count = source.len();
+
+    let first_non_empty = source
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or_default();
+    let preview = first_non_empty.chars().take(120).collect::<String>();
+
+    let converted = format!(
+        "// Auto-converted from npm JS/TS source by vpm.\n\
+// Original file: {relative}\n\
+module.exports.kind = \"npm_void_unit\"\n\
+module.exports.source_file = \"{relative}\"\n\
+module.exports.lines = {line_count}\n\
+module.exports.bytes = {byte_count}\n\
+module.exports.preview = \"{}\"\n\
+module.exports.note = \"Converted to Void-only package format\"\n",
+        escape_void_string(&preview)
+    );
+
+    let output_path = path.with_extension("void");
+    fs::write(&output_path, converted).map_err(|e| e.to_string())?;
+    fs::remove_file(path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn npm_main_to_void_path(main_js: &str) -> String {
+    let trimmed = main_js.trim_start_matches("./");
+    let as_path = PathBuf::from(trimmed);
+    let converted = if is_js_like_source(&as_path) {
+        as_path.with_extension("void")
+    } else if as_path.extension().is_none() {
+        as_path.with_extension("void")
+    } else {
+        as_path
+    };
+    converted.to_string_lossy().replace('\\', "/")
 }
 
 fn escape_toml_string(value: &str) -> String {
@@ -677,25 +927,25 @@ fn escape_void_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-fn npm_wrapper_script(npm_name: &str, npm_version: &str, main_js: &str) -> String {
+fn npm_wrapper_script(npm_name: &str, npm_version: &str, main_void: &str) -> String {
     let npm_name_escaped = escape_void_string(npm_name);
     let npm_version_escaped = escape_void_string(npm_version);
-    let main_js_escaped = escape_void_string(main_js);
+    let main_void_escaped = escape_void_string(main_void);
 
     format!(
         "module.exports.name = \"{npm_name_escaped}\"\n\
 module.exports.version = \"{npm_version_escaped}\"\n\
-module.exports.kind = \"npm_bridge\"\n\
-module.exports.entry_js = \"npm/package/{main_js_escaped}\"\n\
+module.exports.kind = \"npm_to_void\"\n\
+module.exports.entry_void = \"npm/package/{main_void_escaped}\"\n\
+module.exports.runtime = \"void_only\"\n\
+module.exports.warning = \"Auto-converted npm package. Manual API adaptation may be needed.\"\n\
 \n\
 module.exports.run_entry = fn () {{\n\
-  use \"cmd\" as cmd\n\
-  return cmd.run(\"node '\" + __dirname + \"/\" + module.exports.entry_js + \"'\")\n\
+  return \"void-only package: \" + module.exports.entry_void\n\
 }}\n\
 \n\
 module.exports.run = fn (relative_js) {{\n\
-  use \"cmd\" as cmd\n\
-  return cmd.run(\"node '\" + __dirname + \"/npm/package/\" + relative_js + \"'\")\n\
+  return \"void-only conversion mode has no JS runtime bridge\"\n\
 }}\n"
     )
 }

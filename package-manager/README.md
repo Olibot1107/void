@@ -89,16 +89,20 @@ Convert npm package -> Void/VPM-ready package:
 /Users/olie/Desktop/void/package-manager/bin/vpm npm-import discord.js
 # optional:
 # /Users/olie/Desktop/void/package-manager/bin/vpm npm-import @discordjs/builders --version 1.9.0 --as discord_builders
+# install into void_modules (opt-in):
+# /Users/olie/Desktop/void/package-manager/bin/vpm npm-import discord.js --as discord_js --install
 ```
 
 This command:
 
 - downloads package from npm registry
-- converts into `void_modules/<void_name>`
-- extracts source into `void_modules/<void_name>/npm/package`
-- runs `npm install --omit=dev --legacy-peer-deps` inside converted package (when npm is available)
+- caches converted output by npm package + version and reuses it on later imports
+- converts into `vpm-imports/<void_name>` by default
+- extracts source into `<converted_dir>/npm/package` and converts JS/TS files to `.void`
+- does not install into `void_modules` unless `--install` is used
+- does not keep `.js` runtime bridge files
 - generates a Void wrapper (`index.void`) plus `void.json` and `voidpkg.toml`
-- updates `void.lock`
+- updates `void.lock` only when `--install` is used
 
 ## API
 
@@ -117,6 +121,8 @@ This command:
 
 ## Environment variables
 
+- `VOID_BUILD_PROFILE`: launcher build profile for `bin/void-registry` and `bin/vpm` (`dev` default, set to `release` for optimized builds)
+- `VPM_CACHE_DIR`: base cache directory for npm imports (default `$XDG_CACHE_HOME/vpm` or `$HOME/.cache/vpm`)
 - `VOID_REGISTRY_ADDR`: bind address (default `127.0.0.1:4090`)
 - `VOID_REGISTRY_PUBLIC_URL`: base URL used for uploaded file links (default derived from addr)
 - `VOID_REGISTRY_DB`: sqlite DB path (default `registry.db`)

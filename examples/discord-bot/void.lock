@@ -1,0 +1,10 @@
+{
+  "packages": {
+    "discord_js": {
+      "version": "14.25.1",
+      "registry": "https://registry.npmjs.org",
+      "tarball_url": "https://registry.npmjs.org/discord.js/-/discord.js-14.25.1.tgz",
+      "github_repo": "git+https://github.com/discordjs/discord.js.git"
+    }
+  }
+}

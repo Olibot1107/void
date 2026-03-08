@@ -1,0 +1,14 @@
+module.exports.name = "is-odd"
+module.exports.version = "3.0.1"
+module.exports.kind = "npm_bridge"
+module.exports.entry_js = "npm/package/index.js"
+
+module.exports.run_entry = fn () {
+use "cmd" as cmd
+return cmd.run("node '" + __dirname + "/" + module.exports.entry_js + "'")
+}
+
+module.exports.run = fn (relative_js) {
+use "cmd" as cmd
+return cmd.run("node '" + __dirname + "/npm/package/" + relative_js + "'")
+}

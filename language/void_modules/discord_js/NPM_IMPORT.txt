@@ -1,7 +1,0 @@
-This package was converted from npm.
-
-npm: discord.js@14.25.1
-entry: ./src/index.js
-
-Use in Void:
-  use "discord_js" as pkg

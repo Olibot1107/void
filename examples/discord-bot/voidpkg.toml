@@ -1,0 +1,6 @@
+name = "discord_bot_example"
+version = "0.1.0"
+description = "Discord bot example for Void + VPM"
+author = "void"
+tarball_url = ""
+github_repo = ""

@@ -1,0 +1,7 @@
+This package was converted from npm.
+
+npm: is-odd@3.0.1
+entry: index.js
+
+Use in Void:
+  use "npm_is_odd_new" as pkg

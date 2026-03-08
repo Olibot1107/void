@@ -2,7 +2,21 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN_PATH="$ROOT_DIR/target/release/void-registry"
+PROFILE="${VOID_BUILD_PROFILE:-dev}"
+case "$PROFILE" in
+  dev|release) ;;
+  *)
+    echo "Invalid VOID_BUILD_PROFILE '$PROFILE' (expected: dev or release)" >&2
+    exit 2
+    ;;
+esac
+
+TARGET_DIR="debug"
+if [[ "$PROFILE" == "release" ]]; then
+  TARGET_DIR="release"
+fi
+
+BIN_PATH="$ROOT_DIR/target/$TARGET_DIR/void-registry"
 NEEDS_BUILD=0
 
 if [[ ! -x "$BIN_PATH" ]]; then
@@ -19,7 +33,12 @@ fi
 
 if [[ "$NEEDS_BUILD" -eq 1 ]]; then
   source "$HOME/.cargo/env"
-  cargo build --release --manifest-path "$ROOT_DIR/Cargo.toml" -p void-registry >/dev/null
+  echo "[void-registry] building ($PROFILE)..." >&2
+  if [[ "$PROFILE" == "release" ]]; then
+    cargo build --release --manifest-path "$ROOT_DIR/Cargo.toml" -p void-registry >/dev/null
+  else
+    cargo build --manifest-path "$ROOT_DIR/Cargo.toml" -p void-registry >/dev/null
+  fi
 fi
 
 export VOID_REGISTRY_DB="${VOID_REGISTRY_DB:-$ROOT_DIR/registry.db}"

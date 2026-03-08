@@ -1,7 +1,0 @@
-{
-  "main": "index.void",
-  "name": "discord_builders",
-  "npm_name": "@discordjs/builders",
-  "npm_version": "1.13.1",
-  "source": "npm"
-}

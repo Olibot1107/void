@@ -1,6 +1,0 @@
-name = "npm_is_number"
-version = "7.0.0"
-description = "npm import: is-number - Returns true if a number or string value is a finite number. Useful for regex matches, parsing, user input, etc."
-author = "Jon Schlinkert"
-tarball_url = "https://registry.npmjs.org/is-number/-/is-number-7.0.0.tgz"
-github_repo = "git+https://github.com/jonschlinkert/is-number.git"

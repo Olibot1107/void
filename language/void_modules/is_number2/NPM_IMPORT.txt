@@ -1,7 +1,0 @@
-This package was converted from npm.
-
-npm: is-number@7.0.0
-entry: index.js
-
-Use in Void:
-  use "is_number2" as pkg

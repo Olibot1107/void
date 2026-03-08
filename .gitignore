@@ -2,3 +2,4 @@
 /package-manager/target
 /package-manager/registry.db
 /package-manager/uploads
+/examples/**/void_modules
