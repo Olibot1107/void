@@ -84,6 +84,8 @@ if git pull --ff-only origin main --quiet; then
 else
     log_error "Repository update failed"
     log_info "Resolve git issues, then rerun the update."
+    log_info "Safe option (keep changes): git stash push -u -m 'void-update-temp'"
+    log_info "Hard reset option (discard local changes): git fetch origin && git reset --hard origin/main && git clean -fd"
     exit 1
 fi
 

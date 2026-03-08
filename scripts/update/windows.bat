@@ -87,6 +87,8 @@ if errorlevel 1 (
     echo.
     color 0B
     echo %INFO% Resolve git issues, then rerun the update.
+    echo %INFO% Safe option: git stash push -u -m "void-update-temp"
+    echo %INFO% Hard reset option: git fetch origin ^&^& git reset --hard origin/main ^&^& git clean -fd
     color 07
     pause
     exit /b 1
