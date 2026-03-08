@@ -329,6 +329,7 @@ echo.
 color 0B
 echo   void.exe "!VOID_INSTALL_DIR!\void\language\examples\hello.void" - Run hello world
 echo   void.exe "!VOID_INSTALL_DIR!\void\language\examples\main.void"  - Run main example
+echo   void.exe "!VOID_INSTALL_DIR!\void\language\examples\hyperdrive.void" - Run advanced example
 color 07
 echo.
 

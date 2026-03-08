@@ -34,6 +34,7 @@ cargo build --release
 ./void ./examples/nodeish.void arg1 arg2
 ./void ./examples/app
 ./void ./examples/void_native.void
+./void ./examples/hyperdrive.void
 ```
 
 The `./void` launcher auto-rebuilds when source changes.

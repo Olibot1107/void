@@ -1,0 +1,145 @@
+use "void" as v
+use "time" as time
+use "process" as process
+use "path" as path
+use "fs" as fs
+use "cmd" as cmd
+use "json" as json
+
+let started_ms = time.now_ms()
+let run_id = v.id("hyperdrive")
+let cwd = process.cwd()
+
+let out_root = path.join(cwd, ".void-lab")
+fs.mkdir_all(out_root)
+let run_dir = path.join(out_root, run_id)
+fs.mkdir_all(run_dir)
+
+let host_probe = ""
+if process.platform() == "windows" {
+  host_probe = cmd.run("ver")
+} else {
+  host_probe = cmd.run("uname -srm")
+}
+
+let stats = json.parse("{\"ok\":0,\"warn\":0,\"crit\":0,\"total_score\":0,\"peak\":0,\"min\":999}")
+let report = ""
+let waves = 4
+let units_per_wave = 6
+
+let append = fn (line) {
+  report = report + line + "\n"
+  return null
+}
+
+let score_event = fn (cpu, mem, jitter) {
+  let score = cpu * 0.55 + mem * 0.30 + jitter * 0.15
+  return score
+}
+
+append("VOID HYPERDRIVE SIM")
+append("run_id=" + run_id)
+append("started=" + time.iso())
+append("host=" + host_probe)
+append("")
+
+let wave = 1
+while wave <= waves {
+  append("wave " + wave + " online")
+  let unit = 1
+  while unit <= units_per_wave {
+    let cpu = v.rand(20, 99)
+    let mem = v.rand(18, 97)
+    let jitter = v.rand(0, 70)
+    let score = score_event(cpu, mem, jitter)
+
+    let level = "OK"
+    if score >= 74 {
+      level = "CRIT"
+      stats.crit = stats.crit + 1
+    } else if score >= 52 {
+      level = "WARN"
+      stats.warn = stats.warn + 1
+    } else {
+      stats.ok = stats.ok + 1
+    }
+
+    if score > stats.peak {
+      stats.peak = score
+    }
+    if score < stats.min {
+      stats.min = score
+    }
+    stats.total_score = stats.total_score + score
+
+    let event = json.parse("{}")
+    event.id = v.id("evt")
+    event.wave = wave
+    event.unit = unit
+    event.cpu = cpu
+    event.mem = mem
+    event.jitter = jitter
+    event.score = score
+    event.level = level
+    event.timestamp = time.iso()
+
+    let event_name = "event-" + wave + "-" + unit + ".json"
+    let event_path = path.join(run_dir, event_name)
+    fs.write_text(event_path, json.stringify(event))
+
+    append("  unit " + unit + " => " + level + " score=" + score)
+    unit = unit + 1
+  }
+
+  let wave_note = path.join(run_dir, "wave-" + wave + ".txt")
+  fs.write_text(wave_note, "wave " + wave + " complete at " + time.iso())
+  time.sleep_ms(30)
+  wave = wave + 1
+}
+
+let total_events = waves * units_per_wave
+let average = stats.total_score / total_events
+
+let verdict = "STABLE"
+if stats.crit >= 4 || average >= 65 {
+  verdict = "OVERDRIVE"
+} else if stats.warn >= 6 || average >= 52 {
+  verdict = "ELEVATED"
+}
+
+let summary = json.parse("{}")
+summary.run_id = run_id
+summary.started_ms = started_ms
+summary.finished_ms = time.now_ms()
+summary.duration_ms = summary.finished_ms - started_ms
+summary.cpu_count = v.cpu_count()
+summary.cwd = cwd
+summary.verdict = verdict
+summary.total_events = total_events
+summary.ok = stats.ok
+summary.warn = stats.warn
+summary.crit = stats.crit
+summary.average = average
+summary.peak = stats.peak
+summary.min = stats.min
+summary.host = host_probe
+
+let summary_json = json.stringify(summary)
+let summary_path = path.join(run_dir, "summary.json")
+fs.write_text(summary_path, summary_json)
+
+append("")
+append("verdict=" + verdict)
+append("events=" + total_events + " ok=" + stats.ok + " warn=" + stats.warn + " crit=" + stats.crit)
+append("average=" + average + " peak=" + stats.peak + " min=" + stats.min)
+append("duration_ms=" + summary.duration_ms)
+
+let report_path = path.join(run_dir, "report.txt")
+fs.write_text(report_path, report)
+
+say("Void Hyperdrive complete")
+say("run_id:", run_id)
+say("verdict:", verdict, "avg:", average)
+say("artifacts:", fs.list(run_dir))
+say("summary:", summary_path)
+say("report:", report_path)

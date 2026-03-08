@@ -3,3 +3,4 @@
 /package-manager/registry.db
 /package-manager/uploads
 /examples/**/void_modules
+/.void-lab

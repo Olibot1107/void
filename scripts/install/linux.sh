@@ -210,6 +210,7 @@ log_header "✨ Installation Complete!"
 echo -e "${GREEN}${BOLD}Quick Start:${NC}"
 echo -e "  ${CYAN}void $INSTALL_DIR/void/language/examples/hello.void${NC}    Run hello world"
 echo -e "  ${CYAN}void $INSTALL_DIR/void/language/examples/main.void${NC}     Run main example"
+echo -e "  ${CYAN}void $INSTALL_DIR/void/language/examples/hyperdrive.void${NC}  Run advanced example"
 
 echo -e "\n${GREEN}${BOLD}Installation Location:${NC}"
 echo -e "  ${CYAN}$INSTALL_DIR${NC}"

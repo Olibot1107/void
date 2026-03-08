@@ -170,6 +170,7 @@ echo Next steps:
 echo.
 color 0B
 echo   void.exe "!VOID_INSTALL_DIR!\void\language\examples\hello.void" - Test with hello world
+echo   void.exe "!VOID_INSTALL_DIR!\void\language\examples\hyperdrive.void" - Test advanced example
 color 07
 echo.
 

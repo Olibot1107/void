@@ -98,6 +98,7 @@ After a successful update, verify everything works:
 ```bash
 # Test the runtime
 void ~/.local/void/void/language/examples/hello.void
+void ~/.local/void/void/language/examples/hyperdrive.void
 
 # Test the package manager
 vpm --help

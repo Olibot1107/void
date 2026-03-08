@@ -102,6 +102,7 @@ Try these commands:
 ```bash
 # Run examples
 void ~/.local/void/void/language/examples/hello.void
+void ~/.local/void/void/language/examples/hyperdrive.void
 
 # Initialize a new project
 vpm

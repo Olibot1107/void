@@ -133,6 +133,7 @@ log_header "✨ Update Complete!"
 
 echo -e "${GREEN}${BOLD}Next steps:${NC}"
 echo -e "  ${CYAN}void $INSTALL_DIR/void/language/examples/hello.void${NC}    Test with hello world"
+echo -e "  ${CYAN}void $INSTALL_DIR/void/language/examples/hyperdrive.void${NC}  Test advanced example"
 
 echo -e "\n${GREEN}${BOLD}Installation Location:${NC}"
 echo -e "  ${CYAN}$INSTALL_DIR${NC}"
