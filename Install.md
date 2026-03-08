@@ -121,6 +121,7 @@ vpm search util --registry http://127.0.0.1:4090
 - Repository: https://github.com/Olibot1107/void
 - Language Docs: `~/.local/void/void/language/README.md`
 - Package Manager: `~/.local/void/void/package-manager/README.md`
+- Uninstall Guide: `~/.local/void/void/Uninstall.md`
 
 ---
 

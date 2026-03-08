@@ -245,6 +245,7 @@ git show <commit-hash>
 - Repository: https://github.com/Olibot1107/void
 - Language Docs: `~/.local/void/void/language/README.md`
 - Package Manager: `~/.local/void/void/package-manager/README.md`
+- Uninstall Guide: `~/.local/void/void/Uninstall.md`
 
 ---
 
