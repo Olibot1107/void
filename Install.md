@@ -79,14 +79,16 @@ The installer automatically:
 
 ### Linux/macOS:
 ```
-~/.local/void/           # Main installation directory
+~/.local/void/           # Installation root
+~/.local/void/void/      # Cloned Void repository
 ~/.local/bin/void        # Runtime command
 ~/.local/bin/vpm         # Package manager command
 ```
 
 ### Windows:
 ```
-%USERPROFILE%\.void\                   # Main installation directory
+%USERPROFILE%\.void\                    # Installation root
+%USERPROFILE%\.void\void\               # Cloned Void repository
 %USERPROFILE%\.void\bin\void.bat        # Runtime command
 %USERPROFILE%\.void\bin\vpm.bat         # Package manager command
 ```
@@ -99,11 +101,7 @@ Try these commands:
 
 ```bash
 # Run examples
-void ~/.local/void/examples/hello.void
-
-# Start package registry
-cd ~/.local/void/package-manager
-./bin/void-registry
+void ~/.local/void/void/language/examples/hello.void
 
 # Initialize a new project
 vpm
@@ -120,8 +118,8 @@ vpm search util --registry http://127.0.0.1:4090
 ## Documentation
 
 - Repository: https://github.com/Olibot1107/void
-- Language Docs: `~/.local/void/language/README.md`
-- Package Manager: `~/.local/void/package-manager/README.md`
+- Language Docs: `~/.local/void/void/language/README.md`
+- Package Manager: `~/.local/void/void/package-manager/README.md`
 
 ---
 

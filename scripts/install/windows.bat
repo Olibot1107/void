@@ -327,10 +327,8 @@ color 0A
 echo Quick Start:
 echo.
 color 0B
-echo   void.exe examples\hello.void          - Run hello world
-echo   void.exe examples\main.void           - Run main example
-echo   cd !VOID_INSTALL_DIR!\void\package-manager
-echo   .\bin\void-registry.exe               - Start package registry
+echo   void.exe "!VOID_INSTALL_DIR!\void\language\examples\hello.void" - Run hello world
+echo   void.exe "!VOID_INSTALL_DIR!\void\language\examples\main.void"  - Run main example
 color 07
 echo.
 

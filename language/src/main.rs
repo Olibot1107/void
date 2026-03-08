@@ -8,7 +8,7 @@ use std::path::Path;
 
 use runtime::Runtime;
 
-const VERSION: &str = "0.1.0";
+const VERSION: &str = "0.1.1";
 
 fn print_help() {
     println!(

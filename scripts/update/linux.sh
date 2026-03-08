@@ -132,9 +132,7 @@ log_separator
 log_header "✨ Update Complete!"
 
 echo -e "${GREEN}${BOLD}Next steps:${NC}"
-echo -e "  ${CYAN}void ~/.local/void/examples/hello.void${NC}    Test with hello world"
-echo -e "  ${CYAN}cd $INSTALL_DIR/void/package-manager${NC}"
-echo -e "  ${CYAN}./bin/void-registry${NC}                      Start package registry"
+echo -e "  ${CYAN}void $INSTALL_DIR/void/language/examples/hello.void${NC}    Test with hello world"
 
 echo -e "\n${GREEN}${BOLD}Installation Location:${NC}"
 echo -e "  ${CYAN}$INSTALL_DIR${NC}"

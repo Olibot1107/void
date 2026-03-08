@@ -173,6 +173,12 @@ if [ ! -z "$VPM_BIN" ]; then
     log_success "'vpm' command linked"
 fi
 
+# Expose examples at a stable path for docs/quick-start commands.
+if [ -d "$INSTALL_DIR/void/language/examples" ]; then
+    ln -sfn "$INSTALL_DIR/void/language/examples" "$INSTALL_DIR/examples"
+    log_success "Examples linked at $INSTALL_DIR/examples"
+fi
+
 log_separator
 
 # Update PATH
@@ -202,10 +208,8 @@ log_separator
 log_header "✨ Installation Complete!"
 
 echo -e "${GREEN}${BOLD}Quick Start:${NC}"
-echo -e "  ${CYAN}void ./examples/hello.void${NC}              Run hello world"
-echo -e "  ${CYAN}void ./examples/main.void${NC}               Run main example"
-echo -e "  ${CYAN}cd $INSTALL_DIR/void/package-manager${NC}"
-echo -e "  ${CYAN}./bin/void-registry${NC}                     Start package registry"
+echo -e "  ${CYAN}void $INSTALL_DIR/void/language/examples/hello.void${NC}    Run hello world"
+echo -e "  ${CYAN}void $INSTALL_DIR/void/language/examples/main.void${NC}     Run main example"
 
 echo -e "\n${GREEN}${BOLD}Installation Location:${NC}"
 echo -e "  ${CYAN}$INSTALL_DIR${NC}"

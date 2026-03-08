@@ -15,7 +15,7 @@ curl -sSL https://raw.githubusercontent.com/Olibot1107/void/refs/heads/main/scri
 
 #### Option 2: Manual update
 ```bash
-cd ~/.local/void
+cd ~/.local/void/void
 git pull origin main
 cd language && cargo build --release
 cd ../package-manager && npm install && npm run build
@@ -85,7 +85,7 @@ void --version
 Or see what's new in the repository:
 
 ```bash
-cd ~/.local/void
+cd ~/.local/void/void
 git log --oneline -n 10
 ```
 
@@ -97,14 +97,10 @@ After a successful update, verify everything works:
 
 ```bash
 # Test the runtime
-void ~/.local/void/examples/hello.void
+void ~/.local/void/void/language/examples/hello.void
 
 # Test the package manager
 vpm --help
-
-# Start the registry
-cd ~/.local/void/package-manager
-./bin/void-registry
 ```
 
 ---
@@ -117,7 +113,7 @@ If the update fails, try these steps:
 
 1. Check Git status:
 ```bash
-cd ~/.local/void
+cd ~/.local/void/void
 git status
 ```
 
@@ -193,7 +189,7 @@ crontab -e
 If an update breaks something, you can revert:
 
 ```bash
-cd ~/.local/void
+cd ~/.local/void/void
 git log --oneline
 
 # Find the commit you want to revert to
@@ -211,7 +207,7 @@ cd ../package-manager && npm install && npm run build
 Check if updates are available without installing:
 
 ```bash
-cd ~/.local/void
+cd ~/.local/void/void
 git fetch origin
 git log HEAD..origin/main --oneline
 ```
@@ -225,7 +221,7 @@ If there are any lines in the output, updates are available.
 View recent changes:
 
 ```bash
-cd ~/.local/void
+cd ~/.local/void/void
 git log --oneline -n 20
 ```
 
@@ -239,8 +235,8 @@ git show <commit-hash>
 ## Documentation
 
 - Repository: https://github.com/Olibot1107/void
-- Language Docs: `~/.local/void/language/README.md`
-- Package Manager: `~/.local/void/package-manager/README.md`
+- Language Docs: `~/.local/void/void/language/README.md`
+- Package Manager: `~/.local/void/void/package-manager/README.md`
 
 ---
 
@@ -253,7 +249,7 @@ If you need to update dependencies separately:
 rustup update
 
 # Update npm packages
-cd ~/.local/void/package-manager
+cd ~/.local/void/void/package-manager
 npm update
 
 # Update Node.js
