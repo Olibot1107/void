@@ -45,7 +45,15 @@ elif find \
 fi
 
 if [[ "$NEEDS_BUILD" -eq 1 ]]; then
-  source "$HOME/.cargo/env"
+  if [[ -f "$HOME/.cargo/env" ]]; then
+    # shellcheck disable=SC1090
+    source "$HOME/.cargo/env"
+  fi
+  if ! command -v cargo >/dev/null 2>&1; then
+    echo "[vpm] cargo not found in PATH and $HOME/.cargo/env is missing." >&2
+    echo "Install Rust with rustup or add cargo to PATH: https://rustup.rs" >&2
+    exit 1
+  fi
   echo "[vpm] building ($PROFILE)..." >&2
   if [[ "$PROFILE" == "release" ]]; then
     cargo build --release --manifest-path "$ROOT_DIR/Cargo.toml" -p vpm >/dev/null
