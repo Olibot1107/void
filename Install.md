@@ -28,19 +28,24 @@ VOID_INSTALL_DIR=$HOME/my-void-dir ./install.sh
 
 ### Windows
 
-#### Option 1: Direct execution
+#### Option 1: Using PowerShell (Recommended)
+```powershell
+powershell -Command "irm https://raw.githubusercontent.com/Olibot1107/void/refs/heads/main/scripts/install/windows.bat | iex"
+```
+
+#### Option 2: Direct execution
 Simply double-click `install.bat` or run from Command Prompt:
 ```cmd
 install.bat
 ```
 
-#### Option 2: From PowerShell
+#### Option 3: From PowerShell
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 .\install.bat
 ```
 
-#### Option 3: Custom installation directory
+#### Option 4: Custom installation directory
 ```cmd
 set VOID_INSTALL_DIR=C:\custom-path
 install.bat

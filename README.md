@@ -3,6 +3,7 @@
 Void is a fast scripting runtime written in Rust, plus a package ecosystem (`vpm` + web registry).
 
 [Installer](./Install.md)
+[Updater](./Update.md)
 
 ## Repo Layout
 
