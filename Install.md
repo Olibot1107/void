@@ -10,7 +10,7 @@
 
 #### Option 1: Using curl (Recommended)
 ```bash
-curl -sSL https://raw.githubusercontent.com/Olibot1107/void/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Olibot1107/void/main/scripts/install/linux.sh | bash
 ```
 
 #### Option 2: Manual download and run
