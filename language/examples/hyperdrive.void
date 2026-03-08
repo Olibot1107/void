@@ -211,9 +211,23 @@ append("tests pass=" + test.pass + " fail=" + test.fail)
 append("stress iterations=" + stress_iterations + " ms=" + stress_ms + " throughput=" + throughput + "/s")
 append("duration_ms=" + summary.duration_ms)
 
+let end_result = ""
+end_result = end_result + "HYPERDRIVE END RESULT\n"
+end_result = end_result + "run_id=" + run_id + "\n"
+end_result = end_result + "verdict=" + verdict + "\n"
+end_result = end_result + "average=" + average + "\n"
+end_result = end_result + "tests_pass=" + test.pass + "\n"
+end_result = end_result + "tests_fail=" + test.fail + "\n"
+end_result = end_result + "stress_iterations=" + stress_iterations + "\n"
+end_result = end_result + "stress_ms=" + stress_ms + "\n"
+end_result = end_result + "stress_throughput=" + throughput + "/s\n"
+end_result = end_result + "duration_ms=" + summary.duration_ms + "\n"
+end_result = end_result + "finished=" + time.iso() + "\n"
+
 fs.write_text(path.join(run_dir, "summary.json"), json.stringify(summary))
 fs.write_text(path.join(run_dir, "report.txt"), report)
 fs.write_text(path.join(run_dir, "TEST_LOG.txt"), test_log)
+fs.write_text(path.join(run_dir, "END_RESULT.txt"), end_result)
 
 say("Void Hyperdrive complete")
 say("run_id:", run_id)
@@ -221,4 +235,5 @@ say("verdict:", verdict, "avg:", average)
 say("tests:", "pass=" + test.pass, "fail=" + test.fail)
 say("stress:", stress_iterations + " iterations", stress_ms + "ms", throughput + "/s")
 say("artifacts:", fs.list(run_dir))
+say("result:", "saved to END_RESULT.txt")
 say("note:", "no absolute file paths logged")
