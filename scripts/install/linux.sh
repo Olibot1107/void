@@ -230,7 +230,10 @@ cd language
 
 if [ -f "Cargo.toml" ]; then
     log_progress "Compiling Rust code (this may take a while)..."
-    cargo build --release 2>&1 | grep -E "Compiling|Finished" || true
+    if ! cargo build --release; then
+        log_error "Language runtime build failed"
+        exit 1
+    fi
     log_success "Language runtime built"
 else
     log_warning "Cargo.toml not found in language directory"
@@ -246,7 +249,10 @@ cd package-manager
 
 if [ -f "Cargo.toml" ]; then
     log_progress "Compiling Rust package manager binaries..."
-    cargo build --release --manifest-path "$INSTALL_DIR/void/package-manager/Cargo.toml" -p vpm -p void-registry 2>&1 | grep -E "Compiling|Finished" || true
+    if ! cargo build --release --manifest-path "$INSTALL_DIR/void/package-manager/Cargo.toml" -p vpm -p void-registry; then
+        log_error "Package manager build failed"
+        exit 1
+    fi
     log_success "Package manager built"
 else
     log_warning "Cargo.toml not found in package-manager directory"
@@ -261,12 +267,13 @@ log_step "Setting up command shortcuts"
 
 mkdir -p "$HOME/.local/bin"
 
-# Create void executable symlink
-if [ -f "language/target/release/void" ]; then
-    ln -sf "$INSTALL_DIR/void/language/target/release/void" "$HOME/.local/bin/void"
+# Create void executable symlink (use stable launcher script, not target path)
+if [ -f "$INSTALL_DIR/void/language/void" ]; then
+    chmod +x "$INSTALL_DIR/void/language/void" >/dev/null 2>&1 || true
+    ln -sf "$INSTALL_DIR/void/language/void" "$HOME/.local/bin/void"
     log_success "'void' command linked"
 else
-    log_warning "Void executable not found"
+    log_warning "Void launcher not found"
 fi
 
 # Create vpm executable symlink
