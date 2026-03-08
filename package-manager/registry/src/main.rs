@@ -22,6 +22,34 @@ const INDEX_TEMPLATE: &str = include_str!("../templates/index.html");
 const AUTH_GUEST_TEMPLATE: &str = include_str!("../templates/auth_guest.html");
 const AUTH_USER_TEMPLATE: &str = include_str!("../templates/auth_user.html");
 const PACKAGE_CARD_TEMPLATE: &str = include_str!("../templates/package_card.html");
+const NPM_GHOST_AUTHOR: &str = "npm_ghost";
+
+fn log_info(event: &str, detail: impl AsRef<str>) {
+    println!(
+        "[void-registry][{}][INFO][{}] {}",
+        Utc::now().to_rfc3339(),
+        event,
+        detail.as_ref()
+    );
+}
+
+fn log_warn(event: &str, detail: impl AsRef<str>) {
+    eprintln!(
+        "[void-registry][{}][WARN][{}] {}",
+        Utc::now().to_rfc3339(),
+        event,
+        detail.as_ref()
+    );
+}
+
+fn log_error(event: &str, detail: impl AsRef<str>) {
+    eprintln!(
+        "[void-registry][{}][ERROR][{}] {}",
+        Utc::now().to_rfc3339(),
+        event,
+        detail.as_ref()
+    );
+}
 
 #[derive(Clone)]
 struct AppState {
@@ -55,6 +83,17 @@ struct PackageSummary {
 struct PublishRequest {
     name: String,
     version: String,
+    description: Option<String>,
+    tarball_url: Option<String>,
+    github_repo: Option<String>,
+    readme: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NpmImportPublishRequest {
+    name: String,
+    version: String,
+    npm_name: String,
     description: Option<String>,
     tarball_url: Option<String>,
     github_repo: Option<String>,
@@ -130,6 +169,7 @@ struct UploadedFile {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    log_info("startup", "booting void-registry");
     let addr = env::var("VOID_REGISTRY_ADDR").unwrap_or_else(|_| "127.0.0.1:4090".to_string());
     let public_base_url = env::var("VOID_REGISTRY_PUBLIC_URL")
         .unwrap_or_else(|_| default_public_url_from_addr(&addr));
@@ -147,14 +187,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let uploads_path = env::var("VOID_REGISTRY_UPLOADS").unwrap_or_else(|_| "uploads".to_string());
     let upload_dir = absolute_path(&uploads_path)?;
     std::fs::create_dir_all(&upload_dir)?;
+    log_info(
+        "startup",
+        format!(
+            "config addr={} public_base={} db={} uploads={}",
+            addr,
+            public_base_url,
+            db_abs_path.display(),
+            upload_dir.display()
+        ),
+    );
 
     let db_url = format!("sqlite://{}", db_abs_path.display());
     let pool = SqlitePoolOptions::new()
         .max_connections(10)
         .connect(&db_url)
         .await?;
+    log_info("startup", format!("connected to database {}", db_url));
 
     init_db(&pool).await?;
+    log_info("startup", "database schema ready");
 
     let state = AppState {
         db: pool,
@@ -171,6 +223,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/publish", post(publish_form_handler))
         .route("/api/login", post(api_login_handler))
         .route("/api/publish", post(publish_api_handler))
+        .route("/api/publish/npm-import", post(publish_npm_import_api_handler))
         .route("/api/publish/upload", post(publish_upload_api_handler))
         .route("/api/packages", get(list_packages_handler))
         .route("/api/packages/{name}", get(get_package_handler))
@@ -179,18 +232,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     println!("Void registry running at http://{addr}");
+    log_info("startup", format!("listening on {}", addr));
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+
+    log_info("shutdown", "server stopped");
 
     Ok(())
 }
 
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
+    log_warn("shutdown", "received ctrl-c, shutting down gracefully");
 }
 
 async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    log_info("db", "running schema initialization");
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS users (
@@ -260,10 +318,13 @@ async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await?;
 
+    log_info("db", "schema initialization complete");
+
     Ok(())
 }
 
 async fn table_has_column(pool: &SqlitePool, table: &str, column: &str) -> Result<bool, sqlx::Error> {
+    log_info("db", format!("checking column {}.{}", table, column));
     let rows = sqlx::query(&format!("PRAGMA table_info({table})"))
         .fetch_all(pool)
         .await?;
@@ -271,10 +332,12 @@ async fn table_has_column(pool: &SqlitePool, table: &str, column: &str) -> Resul
     for row in rows {
         let name: String = row.try_get("name")?;
         if name == column {
+            log_info("db", format!("column present {}.{}", table, column));
             return Ok(true);
         }
     }
 
+    log_info("db", format!("column missing {}.{}", table, column));
     Ok(false)
 }
 
@@ -283,6 +346,14 @@ async fn index_handler(
     jar: CookieJar,
     Query(query): Query<SearchQuery>,
 ) -> Result<Html<String>, (StatusCode, String)> {
+    log_info(
+        "http.index",
+        format!(
+            "rendering index q='{}' message='{}'",
+            query.q.as_deref().unwrap_or(""),
+            query.message.as_deref().unwrap_or("")
+        ),
+    );
     let current_user = auth_user_from_cookie(&state.db, &jar)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
@@ -290,6 +361,10 @@ async fn index_handler(
     let packages = fetch_packages(&state.db, query.q.as_deref())
         .await
         .map_err(internal_error)?;
+    log_info(
+        "http.index",
+        format!("resolved {} package cards", packages.len()),
+    );
 
     let page = render_index_page(
         current_user.as_ref(),
@@ -305,9 +380,11 @@ async fn upload_file_handler(
     AxumPath(file): AxumPath<String>,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
+    log_info("http.upload_file", format!("request file='{}'", file));
     let safe_name = match sanitize_filename(&file) {
         Some(v) => v,
         None => {
+            log_warn("http.upload_file", "rejected invalid file name");
             return (
                 StatusCode::BAD_REQUEST,
                 "invalid file name".to_string(),
@@ -319,6 +396,10 @@ async fn upload_file_handler(
     let file_path = state.upload_dir.join(safe_name);
     match std::fs::read(&file_path) {
         Ok(bytes) => {
+            log_info(
+                "http.upload_file",
+                format!("served '{}' ({} bytes)", file_path.display(), bytes.len()),
+            );
             let content_type = content_type_for_path(&file_path);
             let mut headers = HeaderMap::new();
             headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
@@ -328,7 +409,13 @@ async fn upload_file_handler(
             );
             (StatusCode::OK, headers, bytes).into_response()
         }
-        Err(_) => (StatusCode::NOT_FOUND, "not found".to_string()).into_response(),
+        Err(err) => {
+            log_warn(
+                "http.upload_file",
+                format!("not found '{}' ({})", file_path.display(), err),
+            );
+            (StatusCode::NOT_FOUND, "not found".to_string()).into_response()
+        }
     }
 }
 
@@ -337,17 +424,26 @@ async fn register_handler(
     jar: CookieJar,
     Form(payload): Form<RegisterForm>,
 ) -> impl IntoResponse {
+    log_info(
+        "http.register",
+        format!("attempt username='{}'", payload.username.trim()),
+    );
     if validate_username(&payload.username).is_err() {
+        log_warn("http.register", "invalid username format");
         return (jar, Redirect::to("/?message=register_invalid")).into_response();
     }
 
     if payload.password.len() < 8 {
+        log_warn("http.register", "password too short");
         return (jar, Redirect::to("/?message=password_short")).into_response();
     }
 
     let password_hash = match hash_password(&payload.password) {
         Ok(v) => v,
-        Err(_) => return (jar, Redirect::to("/?message=register_failed")).into_response(),
+        Err(err) => {
+            log_error("http.register", format!("password hash failed: {}", err));
+            return (jar, Redirect::to("/?message=register_failed")).into_response();
+        }
     };
 
     let created_at = Utc::now().to_rfc3339();
@@ -362,17 +458,23 @@ async fn register_handler(
         Ok(v) => v,
         Err(err) => {
             if err.to_string().to_lowercase().contains("unique") {
+                log_warn("http.register", "username already exists");
                 return (jar, Redirect::to("/?message=user_exists")).into_response();
             }
+            log_error("http.register", format!("insert failed: {}", err));
             return (jar, Redirect::to("/?message=register_failed")).into_response();
         }
     };
 
     let token = match create_session(&state.db, inserted.last_insert_rowid()).await {
         Ok(v) => v,
-        Err(_) => return (jar, Redirect::to("/?message=register_failed")).into_response(),
+        Err(err) => {
+            log_error("http.register", format!("create session failed: {}", err));
+            return (jar, Redirect::to("/?message=register_failed")).into_response();
+        }
     };
 
+    log_info("http.register", "registration succeeded");
     let jar = jar.add(session_cookie(&token));
     (jar, Redirect::to("/?message=registered")).into_response()
 }
@@ -382,34 +484,53 @@ async fn login_handler(
     jar: CookieJar,
     Form(payload): Form<LoginForm>,
 ) -> impl IntoResponse {
+    log_info(
+        "http.login",
+        format!("attempt username='{}'", payload.username.trim()),
+    );
     let user = match find_user_by_username(&state.db, payload.username.trim()).await {
         Ok(Some(v)) => v,
-        Ok(None) => return (jar, Redirect::to("/?message=bad_credentials")).into_response(),
-        Err(_) => return (jar, Redirect::to("/?message=login_failed")).into_response(),
+        Ok(None) => {
+            log_warn("http.login", "user not found");
+            return (jar, Redirect::to("/?message=bad_credentials")).into_response();
+        }
+        Err(err) => {
+            log_error("http.login", format!("lookup failed: {}", err));
+            return (jar, Redirect::to("/?message=login_failed")).into_response();
+        }
     };
 
     if !verify_password(&payload.password, &user.password_hash) {
+        log_warn("http.login", "invalid password");
         return (jar, Redirect::to("/?message=bad_credentials")).into_response();
     }
 
     let token = match create_session(&state.db, user.id).await {
         Ok(v) => v,
-        Err(_) => return (jar, Redirect::to("/?message=login_failed")).into_response(),
+        Err(err) => {
+            log_error("http.login", format!("create session failed: {}", err));
+            return (jar, Redirect::to("/?message=login_failed")).into_response();
+        }
     };
 
+    log_info("http.login", format!("login succeeded user='{}'", user.username));
     let jar = jar.add(session_cookie(&token));
     (jar, Redirect::to("/?message=logged_in")).into_response()
 }
 
 async fn logout_handler(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     if let Some(cookie) = jar.get(SESSION_COOKIE) {
+        log_info("http.logout", "session cookie present, deleting session");
         let _ = sqlx::query("DELETE FROM sessions WHERE token = ?")
             .bind(cookie.value())
             .execute(&state.db)
             .await;
+    } else {
+        log_info("http.logout", "no session cookie, noop logout");
     }
 
     let jar = jar.remove(Cookie::build((SESSION_COOKIE, "")).path("/").build());
+    log_info("http.logout", "logout completed");
     (jar, Redirect::to("/?message=logged_out")).into_response()
 }
 
@@ -418,25 +539,51 @@ async fn publish_form_handler(
     jar: CookieJar,
     multipart: Multipart,
 ) -> impl IntoResponse {
+    log_info("http.publish_form", "publish form request received");
     let user = match auth_user_from_cookie(&state.db, &jar).await {
         Ok(Some(v)) => v,
-        Ok(None) => return (jar, Redirect::to("/?message=login_required")).into_response(),
-        Err(_) => return (jar, Redirect::to("/?message=publish_failed")).into_response(),
+        Ok(None) => {
+            log_warn("http.publish_form", "missing auth cookie");
+            return (jar, Redirect::to("/?message=login_required")).into_response();
+        }
+        Err(err) => {
+            log_error("http.publish_form", format!("auth lookup failed: {}", err));
+            return (jar, Redirect::to("/?message=publish_failed")).into_response();
+        }
     };
 
     let draft = match parse_publish_multipart(multipart).await {
         Ok(v) => v,
-        Err(_) => return (jar, Redirect::to("/?message=publish_failed")).into_response(),
+        Err(err) => {
+            log_error("http.publish_form", format!("multipart parse failed: {}", err));
+            return (jar, Redirect::to("/?message=publish_failed")).into_response();
+        }
     };
 
     let payload = match finalize_publish_draft(&state, draft) {
         Ok(v) => v,
-        Err(_) => return (jar, Redirect::to("/?message=publish_failed")).into_response(),
+        Err(err) => {
+            log_error("http.publish_form", format!("payload validation failed: {}", err));
+            return (jar, Redirect::to("/?message=publish_failed")).into_response();
+        }
     };
+    log_info(
+        "http.publish_form",
+        format!(
+            "user='{}' publishing {}@{}",
+            user.username, payload.name, payload.version
+        ),
+    );
 
     match insert_package(&state.db, payload, &user).await {
-        Ok(()) => (jar, Redirect::to("/?message=published")).into_response(),
-        Err(_) => (jar, Redirect::to("/?message=publish_failed")).into_response(),
+        Ok(()) => {
+            log_info("http.publish_form", "publish succeeded");
+            (jar, Redirect::to("/?message=published")).into_response()
+        }
+        Err(err) => {
+            log_error("http.publish_form", format!("publish failed: {}", err));
+            (jar, Redirect::to("/?message=publish_failed")).into_response()
+        }
     }
 }
 
@@ -444,9 +591,14 @@ async fn api_login_handler(
     State(state): State<AppState>,
     Json(payload): Json<ApiLoginRequest>,
 ) -> impl IntoResponse {
+    log_info(
+        "api.login",
+        format!("attempt username='{}'", payload.username.trim()),
+    );
     let user = match find_user_by_username(&state.db, payload.username.trim()).await {
         Ok(Some(v)) => v,
         Ok(None) => {
+            log_warn("api.login", "user not found");
             return (
                 StatusCode::UNAUTHORIZED,
                 Json(ApiLoginResponse {
@@ -459,6 +611,7 @@ async fn api_login_handler(
                 .into_response();
         }
         Err(_) => {
+            log_error("api.login", "database lookup failed");
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiLoginResponse {
@@ -473,6 +626,7 @@ async fn api_login_handler(
     };
 
     if !verify_password(&payload.password, &user.password_hash) {
+        log_warn("api.login", "invalid password");
         return (
             StatusCode::UNAUTHORIZED,
             Json(ApiLoginResponse {
@@ -486,26 +640,32 @@ async fn api_login_handler(
     }
 
     match create_session(&state.db, user.id).await {
-        Ok(token) => (
-            StatusCode::OK,
-            Json(ApiLoginResponse {
-                ok: true,
-                message: "Login successful".to_string(),
-                token: Some(token),
-                username: Some(user.username),
-            }),
-        )
-            .into_response(),
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiLoginResponse {
-                ok: false,
-                message: "Could not create session".to_string(),
-                token: None,
-                username: None,
-            }),
-        )
-            .into_response(),
+        Ok(token) => {
+            log_info("api.login", format!("login succeeded user='{}'", user.username));
+            (
+                StatusCode::OK,
+                Json(ApiLoginResponse {
+                    ok: true,
+                    message: "Login successful".to_string(),
+                    token: Some(token),
+                    username: Some(user.username),
+                }),
+            )
+                .into_response()
+        }
+        Err(err) => {
+            log_error("api.login", format!("create session failed: {}", err));
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiLoginResponse {
+                    ok: false,
+                    message: "Could not create session".to_string(),
+                    token: None,
+                    username: None,
+                }),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -515,9 +675,11 @@ async fn publish_api_handler(
     headers: HeaderMap,
     Json(payload): Json<PublishRequest>,
 ) -> impl IntoResponse {
+    log_info("api.publish", "json publish request received");
     let user = match auth_user_for_api(&state.db, &jar, &headers).await {
         Ok(Some(v)) => v,
         Ok(None) => {
+            log_warn("api.publish", "authentication required");
             return (
                 StatusCode::UNAUTHORIZED,
                 Json(ApiMessage {
@@ -528,6 +690,7 @@ async fn publish_api_handler(
                 .into_response();
         }
         Err(err) => {
+            log_error("api.publish", format!("auth failed: {}", err));
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiMessage {
@@ -538,17 +701,27 @@ async fn publish_api_handler(
                 .into_response();
         }
     };
+    log_info(
+        "api.publish",
+        format!(
+            "user='{}' publishing {}@{}",
+            user.username, payload.name, payload.version
+        ),
+    );
 
     match validate_publish_request(payload) {
         Ok(valid) => match insert_package(&state.db, valid, &user).await {
-            Ok(()) => (
-                StatusCode::CREATED,
-                Json(ApiMessage {
-                    ok: true,
-                    message: "Package published".to_string(),
-                }),
-            )
-                .into_response(),
+            Ok(()) => {
+                log_info("api.publish", "publish succeeded");
+                (
+                    StatusCode::CREATED,
+                    Json(ApiMessage {
+                        ok: true,
+                        message: "Package published".to_string(),
+                    }),
+                )
+                    .into_response()
+            }
             Err(err) => (
                 StatusCode::BAD_REQUEST,
                 Json(ApiMessage {
@@ -558,14 +731,68 @@ async fn publish_api_handler(
             )
                 .into_response(),
         },
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(ApiMessage {
-                ok: false,
-                message: err,
-            }),
-        )
-            .into_response(),
+        Err(err) => {
+            log_warn("api.publish", format!("validation failed: {}", err));
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ApiMessage {
+                    ok: false,
+                    message: err,
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn publish_npm_import_api_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<NpmImportPublishRequest>,
+) -> impl IntoResponse {
+    log_info("api.publish_npm_import", "guest npm-import publish request received");
+
+    match validate_npm_import_publish_request(payload) {
+        Ok(valid) => {
+            log_info(
+                "api.publish_npm_import",
+                format!("guest publishing {}@{}", valid.name, valid.version),
+            );
+            match insert_package_guest(&state.db, valid, NPM_GHOST_AUTHOR).await {
+                Ok(()) => {
+                    log_info("api.publish_npm_import", "publish succeeded");
+                    (
+                        StatusCode::CREATED,
+                        Json(ApiMessage {
+                            ok: true,
+                            message: "Package published".to_string(),
+                        }),
+                    )
+                        .into_response()
+                }
+                Err(err) => (
+                    StatusCode::BAD_REQUEST,
+                    Json(ApiMessage {
+                        ok: false,
+                        message: err,
+                    }),
+                )
+                    .into_response(),
+            }
+        }
+        Err(err) => {
+            log_warn(
+                "api.publish_npm_import",
+                format!("validation failed: {}", err),
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ApiMessage {
+                    ok: false,
+                    message: err,
+                }),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -575,9 +802,11 @@ async fn publish_upload_api_handler(
     headers: HeaderMap,
     multipart: Multipart,
 ) -> impl IntoResponse {
+    log_info("api.publish_upload", "multipart publish request received");
     let user = match auth_user_for_api(&state.db, &jar, &headers).await {
         Ok(Some(v)) => v,
         Ok(None) => {
+            log_warn("api.publish_upload", "authentication required");
             return (
                 StatusCode::UNAUTHORIZED,
                 Json(ApiMessage {
@@ -588,6 +817,7 @@ async fn publish_upload_api_handler(
                 .into_response();
         }
         Err(err) => {
+            log_error("api.publish_upload", format!("auth failed: {}", err));
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiMessage {
@@ -602,6 +832,7 @@ async fn publish_upload_api_handler(
     let draft = match parse_publish_multipart(multipart).await {
         Ok(v) => v,
         Err(err) => {
+            log_warn("api.publish_upload", format!("multipart parse failed: {}", err));
             return (
                 StatusCode::BAD_REQUEST,
                 Json(ApiMessage {
@@ -616,6 +847,7 @@ async fn publish_upload_api_handler(
     let payload = match finalize_publish_draft(&state, draft) {
         Ok(v) => v,
         Err(err) => {
+            log_warn("api.publish_upload", format!("validation failed: {}", err));
             return (
                 StatusCode::BAD_REQUEST,
                 Json(ApiMessage {
@@ -626,16 +858,26 @@ async fn publish_upload_api_handler(
                 .into_response();
         }
     };
+    log_info(
+        "api.publish_upload",
+        format!(
+            "user='{}' publishing {}@{}",
+            user.username, payload.name, payload.version
+        ),
+    );
 
     match insert_package(&state.db, payload, &user).await {
-        Ok(()) => (
-            StatusCode::CREATED,
-            Json(ApiMessage {
-                ok: true,
-                message: "Package published".to_string(),
-            }),
-        )
-            .into_response(),
+        Ok(()) => {
+            log_info("api.publish_upload", "publish succeeded");
+            (
+                StatusCode::CREATED,
+                Json(ApiMessage {
+                    ok: true,
+                    message: "Package published".to_string(),
+                }),
+            )
+                .into_response()
+        }
         Err(err) => (
             StatusCode::BAD_REQUEST,
             Json(ApiMessage {
@@ -650,7 +892,12 @@ async fn publish_upload_api_handler(
 async fn list_packages_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<PackageSummary>>, (StatusCode, String)> {
+    log_info("api.list_packages", "list latest packages");
     let packages = fetch_packages(&state.db, None).await.map_err(internal_error)?;
+    log_info(
+        "api.list_packages",
+        format!("returning {} package summaries", packages.len()),
+    );
     Ok(Json(packages))
 }
 
@@ -658,6 +905,7 @@ async fn get_package_handler(
     State(state): State<AppState>,
     AxumPath(name): AxumPath<String>,
 ) -> Result<Json<Vec<PackageVersion>>, (StatusCode, String)> {
+    log_info("api.get_package", format!("fetch package '{}'", name));
     let rows = sqlx::query_as::<_, PackageVersion>(
         r#"
         SELECT name, version, description, author, tarball_url, github_repo, readme, created_at
@@ -666,10 +914,14 @@ async fn get_package_handler(
         ORDER BY created_at DESC
         "#,
     )
-    .bind(name)
+    .bind(&name)
     .fetch_all(&state.db)
     .await
     .map_err(internal_error)?;
+    log_info(
+        "api.get_package",
+        format!("package '{}' has {} versions", name, rows.len()),
+    );
 
     Ok(Json(rows))
 }
@@ -678,9 +930,14 @@ async fn search_handler(
     State(state): State<AppState>,
     Query(params): Query<SearchQuery>,
 ) -> Result<Json<Vec<PackageSummary>>, (StatusCode, String)> {
+    log_info(
+        "api.search",
+        format!("query='{}'", params.q.as_deref().unwrap_or("")),
+    );
     let rows = fetch_packages(&state.db, params.q.as_deref())
         .await
         .map_err(internal_error)?;
+    log_info("api.search", format!("returning {} rows", rows.len()));
 
     Ok(Json(rows))
 }
@@ -689,6 +946,7 @@ async fn fetch_packages(pool: &SqlitePool, query: Option<&str>) -> Result<Vec<Pa
     if let Some(q) = query
         && !q.trim().is_empty()
     {
+        log_info("db.fetch_packages", format!("search mode q='{}'", q.trim()));
         let like = format!("%{}%", q.trim());
         return sqlx::query_as::<_, PackageSummary>(
             r#"
@@ -712,6 +970,8 @@ async fn fetch_packages(pool: &SqlitePool, query: Option<&str>) -> Result<Vec<Pa
         .await;
     }
 
+    log_info("db.fetch_packages", "latest mode (no search query)");
+
     sqlx::query_as::<_, PackageSummary>(
         r#"
         SELECT p.name, p.version, p.description, p.author, p.created_at
@@ -732,10 +992,12 @@ async fn fetch_packages(pool: &SqlitePool, query: Option<&str>) -> Result<Vec<Pa
 
 async fn auth_user_from_cookie(pool: &SqlitePool, jar: &CookieJar) -> Result<Option<AuthUser>, String> {
     if let Some(cookie) = jar.get(SESSION_COOKIE) {
+        log_info("auth.cookie", "session cookie present, validating token");
         return auth_user_from_token(pool, cookie.value())
             .await
             .map_err(|e| format!("Database error: {e}"));
     }
+    log_info("auth.cookie", "no session cookie");
     Ok(None)
 }
 
@@ -745,15 +1007,18 @@ async fn auth_user_for_api(
     headers: &HeaderMap,
 ) -> Result<Option<AuthUser>, String> {
     if let Some(user) = auth_user_from_cookie(pool, jar).await? {
+        log_info("auth.api", format!("authenticated via cookie as '{}'", user.username));
         return Ok(Some(user));
     }
 
     if let Some(token) = extract_bearer_token(headers) {
+        log_info("auth.api", "bearer token found, validating");
         return auth_user_from_token(pool, &token)
             .await
             .map_err(|e| format!("Database error: {e}"));
     }
 
+    log_warn("auth.api", "no auth cookie or bearer token");
     Ok(None)
 }
 
@@ -767,6 +1032,10 @@ fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
 }
 
 async fn auth_user_from_token(pool: &SqlitePool, token: &str) -> Result<Option<AuthUser>, sqlx::Error> {
+    log_info(
+        "auth.token",
+        format!("validating token prefix='{}...'", &token.chars().take(8).collect::<String>()),
+    );
     let now = Utc::now().to_rfc3339();
     let row = sqlx::query_as::<_, (i64, String)>(
         r#"
@@ -782,7 +1051,13 @@ async fn auth_user_from_token(pool: &SqlitePool, token: &str) -> Result<Option<A
     .fetch_optional(pool)
     .await?;
 
-    Ok(row.map(|(id, username)| AuthUser { id, username }))
+    let user = row.map(|(id, username)| AuthUser { id, username });
+    if let Some(found) = user.as_ref() {
+        log_info("auth.token", format!("token valid for user='{}'", found.username));
+    } else {
+        log_warn("auth.token", "token invalid or expired");
+    }
+    Ok(user)
 }
 
 async fn find_user_by_username(pool: &SqlitePool, username: &str) -> Result<Option<UserRecord>, sqlx::Error> {
@@ -795,6 +1070,7 @@ async fn find_user_by_username(pool: &SqlitePool, username: &str) -> Result<Opti
 }
 
 async fn create_session(pool: &SqlitePool, user_id: i64) -> Result<String, String> {
+    log_info("auth.session", format!("creating session for user_id={}", user_id));
     let token = random_token();
     let created_at = Utc::now().to_rfc3339();
     let expires_at = (Utc::now() + Duration::days(30)).to_rfc3339();
@@ -808,6 +1084,7 @@ async fn create_session(pool: &SqlitePool, user_id: i64) -> Result<String, Strin
         .await
         .map_err(|e| format!("Database error: {e}"))?;
 
+    log_info("auth.session", format!("session created for user_id={}", user_id));
     Ok(token)
 }
 
@@ -821,6 +1098,73 @@ fn session_cookie(token: &str) -> Cookie<'static> {
         .http_only(true)
         .same_site(SameSite::Lax)
         .build()
+}
+
+fn normalize_npm_name_for_void(npm_name: &str) -> String {
+    let mut out = String::new();
+    let mut last_was_sep = false;
+
+    for ch in npm_name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_was_sep = false;
+        } else if !last_was_sep {
+            out.push('_');
+            last_was_sep = true;
+        }
+    }
+
+    out.trim_matches('_').to_string()
+}
+
+fn validate_npm_import_publish_request(
+    mut payload: NpmImportPublishRequest,
+) -> Result<PublishRequest, String> {
+    payload.name = payload.name.trim().to_string();
+    payload.version = payload.version.trim().to_string();
+    payload.npm_name = payload.npm_name.trim().to_string();
+    payload.description = payload.description.map(|s| s.trim().to_string());
+    payload.tarball_url = payload.tarball_url.map(|s| s.trim().to_string());
+    payload.github_repo = payload.github_repo.map(|s| s.trim().to_string());
+
+    validate_name(&payload.name)?;
+    validate_version(&payload.version)?;
+
+    if payload.npm_name.is_empty() {
+        return Err("npm_name is required for npm-import guest publish".to_string());
+    }
+
+    let normalized = normalize_npm_name_for_void(&payload.npm_name);
+    if normalized.is_empty() {
+        return Err("npm_name is not valid".to_string());
+    }
+    let expected_prefixed = format!("npm_{}", normalized);
+    if payload.name != normalized && payload.name != expected_prefixed {
+        return Err(format!(
+            "npm-import guest publish only allows '{}' or '{}' package names",
+            normalized, expected_prefixed
+        ));
+    }
+
+    let tarball = payload.tarball_url.as_deref().unwrap_or_default();
+    if tarball.is_empty() {
+        return Err("npm-import guest publish requires tarball_url".to_string());
+    }
+    if !tarball.starts_with("https://registry.npmjs.org/") {
+        return Err("npm-import guest publish requires an npm registry tarball URL".to_string());
+    }
+    if !tarball.contains(&payload.version) {
+        return Err("tarball_url must match the published version".to_string());
+    }
+
+    Ok(PublishRequest {
+        name: payload.name,
+        version: payload.version,
+        description: payload.description,
+        tarball_url: payload.tarball_url,
+        github_repo: payload.github_repo,
+        readme: payload.readme,
+    })
 }
 
 fn validate_publish_request(mut payload: PublishRequest) -> Result<PublishRequest, String> {
@@ -886,6 +1230,7 @@ fn finalize_publish_draft(state: &AppState, mut draft: PublishDraft) -> Result<P
 }
 
 async fn parse_publish_multipart(mut multipart: Multipart) -> Result<PublishDraft, String> {
+    log_info("publish.multipart", "parsing multipart fields");
     let mut draft = PublishDraft::default();
 
     while let Some(field) = multipart.next_field().await.map_err(|e| e.to_string())? {
@@ -896,12 +1241,28 @@ async fn parse_publish_multipart(mut multipart: Multipart) -> Result<PublishDraf
             let bytes = field.bytes().await.map_err(|e| e.to_string())?.to_vec();
             if !bytes.is_empty() {
                 if bytes.len() > MAX_UPLOAD_BYTES {
+                    log_warn(
+                        "publish.multipart",
+                        format!("file too large name='{}' bytes={}", original_name, bytes.len()),
+                    );
                     return Err("Uploaded file is too large".to_string());
                 }
                 draft.uploaded_file = Some(UploadedFile {
                     file_name: original_name,
                     bytes,
                 });
+                log_info(
+                    "publish.multipart",
+                    format!(
+                        "received upload file='{}' bytes={}",
+                        draft
+                            .uploaded_file
+                            .as_ref()
+                            .map(|f| f.file_name.as_str())
+                            .unwrap_or(""),
+                        draft.uploaded_file.as_ref().map(|f| f.bytes.len()).unwrap_or(0)
+                    ),
+                );
             }
             continue;
         }
@@ -919,8 +1280,14 @@ async fn parse_publish_multipart(mut multipart: Multipart) -> Result<PublishDraf
     }
 
     if draft.name.is_empty() || draft.version.is_empty() {
+        log_warn("publish.multipart", "missing required name/version fields");
         return Err("name and version are required".to_string());
     }
+
+    log_info(
+        "publish.multipart",
+        format!("parsed draft {}@{}", draft.name, draft.version),
+    );
 
     Ok(draft)
 }
@@ -950,6 +1317,15 @@ fn save_upload_and_build_url(
 
     let full_path = upload_dir.join(&file_name);
     std::fs::write(&full_path, uploaded.bytes).map_err(|e| e.to_string())?;
+    log_info(
+        "publish.upload",
+        format!(
+            "stored upload for {}@{} at {}",
+            package_name,
+            version,
+            full_path.display()
+        ),
+    );
 
     Ok(format!(
         "{}/uploads/{}",
@@ -959,6 +1335,28 @@ fn save_upload_and_build_url(
 }
 
 async fn insert_package(pool: &SqlitePool, payload: PublishRequest, user: &AuthUser) -> Result<(), String> {
+    insert_package_with_owner(pool, payload, Some(user), None).await
+}
+
+async fn insert_package_guest(
+    pool: &SqlitePool,
+    payload: PublishRequest,
+    author_name: &str,
+) -> Result<(), String> {
+    insert_package_with_owner(pool, payload, None, Some(author_name)).await
+}
+
+async fn insert_package_with_owner(
+    pool: &SqlitePool,
+    payload: PublishRequest,
+    user: Option<&AuthUser>,
+    author_override: Option<&str>,
+) -> Result<(), String> {
+    let actor = user.map(|u| format!("user='{}'", u.username)).unwrap_or_else(|| "user='<guest>'".to_string());
+    log_info(
+        "db.insert_package",
+        format!("attempt by {} for {}@{}", actor, payload.name, payload.version),
+    );
     let existing_owner = sqlx::query_scalar::<_, i64>(
         "SELECT user_id FROM packages WHERE name = ? AND user_id IS NOT NULL LIMIT 1",
     )
@@ -967,10 +1365,17 @@ async fn insert_package(pool: &SqlitePool, payload: PublishRequest, user: &AuthU
     .await
     .map_err(|e| format!("Database error: {e}"))?;
 
-    if let Some(owner_id) = existing_owner
-        && owner_id != user.id
-    {
-        return Err("Package name is already owned by another account".to_string());
+    if let Some(owner_id) = existing_owner {
+        match user {
+            Some(current_user) if owner_id == current_user.id => {}
+            _ => {
+                log_warn(
+                    "db.insert_package",
+                    format!("ownership conflict for package '{}'", payload.name),
+                );
+                return Err("Package name is already owned by another account".to_string());
+            }
+        }
     }
 
     let description = payload.description.unwrap_or_default();
@@ -978,6 +1383,13 @@ async fn insert_package(pool: &SqlitePool, payload: PublishRequest, user: &AuthU
     let github_repo = payload.github_repo.unwrap_or_default();
     let readme = payload.readme.unwrap_or_default();
     let created_at = Utc::now().to_rfc3339();
+    let package_name = payload.name.clone();
+    let package_version = payload.version.clone();
+    let author = author_override
+        .map(ToString::to_string)
+        .or_else(|| user.map(|u| u.username.clone()))
+        .unwrap_or_else(|| NPM_GHOST_AUTHOR.to_string());
+    let user_id = user.map(|u| u.id);
 
     sqlx::query(
         r#"
@@ -985,18 +1397,26 @@ async fn insert_package(pool: &SqlitePool, payload: PublishRequest, user: &AuthU
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
-    .bind(payload.name)
-    .bind(payload.version)
+    .bind(&payload.name)
+    .bind(&payload.version)
     .bind(description)
-    .bind(&user.username)
+    .bind(author.clone())
     .bind(tarball_url)
     .bind(github_repo)
     .bind(readme)
-    .bind(user.id)
+    .bind(user_id)
     .bind(created_at)
     .execute(pool)
     .await
     .map_err(|e| format!("Database error: {e}"))?;
+
+    log_info(
+        "db.insert_package",
+        format!(
+            "inserted {}@{} by '{}'",
+            package_name, package_version, author
+        ),
+    );
 
     Ok(())
 }
@@ -1203,6 +1623,7 @@ fn slugify(input: &str) -> String {
 }
 
 fn internal_error(err: sqlx::Error) -> (StatusCode, String) {
+    log_error("db", format!("internal database error: {}", err));
     (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {err}"))
 }
 

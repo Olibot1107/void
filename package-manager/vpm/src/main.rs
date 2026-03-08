@@ -4,6 +4,7 @@ use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use flate2::read::GzDecoder;
@@ -56,6 +57,10 @@ enum Commands {
         alias: Option<String>,
         #[arg(long)]
         install: bool,
+        #[arg(long, default_value = DEFAULT_REGISTRY)]
+        registry: String,
+        #[arg(long)]
+        token: Option<String>,
         #[arg(long)]
         with_npm_deps: bool,
         #[arg(long)]
@@ -81,6 +86,8 @@ struct PublishPayload {
     tarball_url: Option<String>,
     github_repo: Option<String>,
     readme: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    npm_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -166,6 +173,8 @@ fn main() {
             version,
             alias,
             install,
+            registry,
+            token,
             with_npm_deps,
             out_dir,
         }) => cmd_npm_import(
@@ -173,6 +182,8 @@ fn main() {
             version.as_deref(),
             alias.as_deref(),
             install,
+            &registry,
+            token.as_deref(),
             with_npm_deps,
             out_dir.as_deref(),
         ),
@@ -255,6 +266,7 @@ fn cmd_publish(
         tarball_url: manifest.tarball_url,
         github_repo,
         readme,
+        npm_name: None,
     };
 
     let client = Client::new();
@@ -285,6 +297,27 @@ fn publish_json(
     }
 
     let response = request.send().map_err(|e| e.to_string())?;
+    let status = response.status();
+    let api: ApiMessage = response.json().map_err(|e| e.to_string())?;
+
+    if !status.is_success() {
+        return Ok(api);
+    }
+
+    Ok(api)
+}
+
+fn publish_npm_import_guest(
+    client: &Client,
+    registry: &str,
+    payload: &PublishPayload,
+) -> Result<ApiMessage, String> {
+    let url = format!("{}/api/publish/npm-import", normalize_registry(registry));
+    let response = client
+        .post(url)
+        .json(payload)
+        .send()
+        .map_err(|e| e.to_string())?;
     let status = response.status();
     let api: ApiMessage = response.json().map_err(|e| e.to_string())?;
 
@@ -372,14 +405,7 @@ fn cmd_install(registry: &str, name: &str, version: Option<&str>) -> Result<(), 
     validate_package_name(name)?;
 
     let client = Client::new();
-    let url = format!("{}/api/packages/{}", normalize_registry(registry), name);
-
-    let response = client.get(url).send().map_err(|e| e.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("Registry returned status {}", response.status()));
-    }
-
-    let versions: Vec<PackageVersion> = response.json().map_err(|e| e.to_string())?;
+    let versions = fetch_registry_package_versions(&client, registry, name)?;
     if versions.is_empty() {
         return Err(format!("Package '{name}' not found"));
     }
@@ -421,11 +447,26 @@ fn cmd_install(registry: &str, name: &str, version: Option<&str>) -> Result<(), 
     Ok(())
 }
 
+fn fetch_registry_package_versions(
+    client: &Client,
+    registry: &str,
+    name: &str,
+) -> Result<Vec<PackageVersion>, String> {
+    let url = format!("{}/api/packages/{}", normalize_registry(registry), name);
+    let response = client.get(url).send().map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Registry returned status {}", response.status()));
+    }
+    response.json().map_err(|e| e.to_string())
+}
+
 fn cmd_npm_import(
     package: &str,
     version: Option<&str>,
     alias: Option<&str>,
     install: bool,
+    registry: &str,
+    token: Option<&str>,
     with_npm_deps: bool,
     out_dir: Option<&Path>,
 ) -> Result<(), String> {
@@ -433,7 +474,34 @@ fn cmd_npm_import(
         return Err("Package name cannot be empty".to_string());
     }
 
+    let void_name = alias
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| npm_name_to_void_name(package));
+    validate_package_name(&void_name)?;
+
+    let module_dir = if install {
+        PathBuf::from("void_modules").join(&void_name)
+    } else if let Some(custom_dir) = out_dir {
+        custom_dir.join(&void_name)
+    } else {
+        PathBuf::from("vpm-imports").join(&void_name)
+    };
+
+    let pinned_version = if version.is_none() {
+        read_existing_import_version(&module_dir)
+    } else {
+        None
+    };
+
     let client = Client::new();
+    let registry_versions = if install {
+        fetch_registry_package_versions(&client, registry, &void_name).map_err(|err| {
+            format!("Registry API is required for npm-import --install: {err}")
+        })?
+    } else {
+        Vec::new()
+    };
+
     let encoded_name = encode_npm_name(package);
     let metadata_url = format!("https://registry.npmjs.org/{encoded_name}");
     let response = client.get(&metadata_url).send().map_err(|e| e.to_string())?;
@@ -448,11 +516,28 @@ fn cmd_npm_import(
     let root: NpmPackageRoot = response.json().map_err(|e| e.to_string())?;
     let selected_version = match version {
         Some(v) => v.to_string(),
-        None => root
-            .dist_tags
-            .get("latest")
-            .cloned()
-            .ok_or_else(|| format!("npm package '{package}' does not have a latest dist-tag"))?,
+        None => {
+            if install && !registry_versions.is_empty() {
+                let existing = registry_versions
+                    .first()
+                    .map(|pkg| pkg.version.clone())
+                    .unwrap_or_default();
+                println!(
+                    "Using website registry version {existing} for {void_name}. Pass --version to override."
+                );
+                existing
+            } else if let Some(existing) = pinned_version {
+                println!(
+                    "Using pinned version {existing} from previous import for {package}. Pass --version to change it."
+                );
+                existing
+            } else {
+                root.dist_tags
+                    .get("latest")
+                    .cloned()
+                    .ok_or_else(|| format!("npm package '{package}' does not have a latest dist-tag"))?
+            }
+        }
     };
 
     let version_meta = root
@@ -490,20 +575,8 @@ fn cmd_npm_import(
         .or_else(|| root.author.as_ref().and_then(extract_author_name))
         .unwrap_or_else(|| "npm".to_string());
 
-    let void_name = alias
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| npm_name_to_void_name(package));
-    validate_package_name(&void_name)?;
-
-    let module_dir = if install {
-        PathBuf::from("void_modules").join(&void_name)
-    } else if let Some(custom_dir) = out_dir {
-        custom_dir.join(&void_name)
-    } else {
-        PathBuf::from("vpm-imports").join(&void_name)
-    };
     if module_dir.exists() {
-        fs::remove_dir_all(&module_dir).map_err(|e| e.to_string())?;
+        remove_dir_tree(&module_dir)?;
     }
     fs::create_dir_all(&module_dir).map_err(|e| e.to_string())?;
 
@@ -564,13 +637,71 @@ fn cmd_npm_import(
         "This package was converted from npm to Void-only format.\n\nnpm: {}@{}\nentry.js: {}\nentry.void: {}\n\nUse in Void:\n  use \"{}\" as pkg\n",
         package, selected_version, main_js, main_void, void_name
     );
-    fs::write(module_dir.join("NPM_IMPORT.txt"), source_note).map_err(|e| e.to_string())?;
+    fs::write(module_dir.join("NPM_IMPORT.txt"), &source_note).map_err(|e| e.to_string())?;
 
     if install {
+        let registry_has_version = registry_versions
+            .iter()
+            .any(|pkg| pkg.version == selected_version);
+
+        if registry_has_version {
+            println!(
+                "Website registry already has {}@{} (publish skipped).",
+                void_name, selected_version
+            );
+        } else {
+            let payload = PublishPayload {
+                name: void_name.clone(),
+                version: selected_version.clone(),
+                description: Some(format!("npm import: {package} - {description}")),
+                tarball_url: Some(tarball_url.clone()),
+                github_repo: if repository.trim().is_empty() {
+                    None
+                } else {
+                    Some(repository.clone())
+                },
+                readme: Some(source_note.clone()),
+                npm_name: Some(package.to_string()),
+            };
+
+            let api = if let Some(token_owned) = token
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .or_else(|| {
+                    std::env::var("VPM_TOKEN")
+                        .ok()
+                        .map(|value| value.trim().to_string())
+                        .filter(|value| !value.is_empty())
+                }) {
+                publish_json(&client, registry, Some(token_owned.as_str()), &payload)?
+            } else {
+                publish_npm_import_guest(&client, registry, &payload)?
+            };
+            if api.ok {
+                println!(
+                    "Published {}@{} to website registry {}",
+                    void_name,
+                    selected_version,
+                    normalize_registry(registry)
+                );
+            } else {
+                let message_lower = api.message.to_lowercase();
+                if message_lower.contains("unique") {
+                    println!(
+                        "Website registry already contains {}@{} (duplicate publish skipped).",
+                        void_name, selected_version
+                    );
+                } else {
+                    return Err(format!("Website registry publish failed: {}", api.message));
+                }
+            }
+        }
+
         update_lockfile(
             &void_name,
             &selected_version,
-            "https://registry.npmjs.org",
+            registry,
             &tarball_url,
             &repository,
         )?;
@@ -592,7 +723,7 @@ fn cmd_npm_import(
 fn install_from_github(module_dir: &Path, github_repo: &str) -> Result<(), String> {
     let repo_dir = module_dir.join("repo");
     if repo_dir.exists() {
-        fs::remove_dir_all(&repo_dir).map_err(|e| e.to_string())?;
+        remove_dir_tree(&repo_dir)?;
     }
 
     let result = Command::new("git")
@@ -655,6 +786,39 @@ fn update_lockfile(
 
     let content = serde_json::to_string_pretty(&lock).map_err(|e| e.to_string())?;
     fs::write(lock_path, content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn remove_dir_tree(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    for attempt in 0..4 {
+        match fs::remove_dir_all(path) {
+            Ok(()) => return Ok(()),
+            Err(_) => std::thread::sleep(Duration::from_millis(40 * (attempt + 1) as u64)),
+        }
+    }
+
+    // Fallback: remove children manually, then remove root.
+    remove_dir_contents(path)?;
+    fs::remove_dir(path).map_err(|e| format!("Failed to remove '{}': {e}", path.display()))?;
+    Ok(())
+}
+
+fn remove_dir_contents(path: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(path).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let entry_path = entry.path();
+        if entry_path.is_dir() {
+            remove_dir_tree(&entry_path)?;
+        } else {
+            fs::remove_file(&entry_path).map_err(|e| {
+                format!("Failed to remove file '{}': {e}", entry_path.display())
+            })?;
+        }
+    }
     Ok(())
 }
 
@@ -735,6 +899,18 @@ fn npm_import_cache_dir(package: &str, version: &str) -> PathBuf {
         .join(sanitize_cache_segment(version))
 }
 
+fn read_existing_import_version(module_dir: &Path) -> Option<String> {
+    let package_json = module_dir.join("package.json");
+    let raw = fs::read_to_string(package_json).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    parsed
+        .get("version")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
 fn ensure_npm_import_cache(
     client: &Client,
     package: &str,
@@ -754,7 +930,7 @@ fn ensure_npm_import_cache(
     }
 
     if cache_dir.exists() {
-        fs::remove_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+        remove_dir_tree(&cache_dir)?;
     }
     fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
 
@@ -779,7 +955,7 @@ fn ensure_npm_import_cache(
             converted_units,
         }),
         Err(err) => {
-            let _ = fs::remove_dir_all(&cache_dir);
+            let _ = remove_dir_tree(&cache_dir);
             Err(err)
         }
     }
@@ -867,7 +1043,7 @@ fn count_void_units(root: &Path) -> Result<usize, String> {
 
 fn copy_dir_recursive(source: &Path, destination: &Path) -> Result<(), String> {
     if destination.exists() {
-        fs::remove_dir_all(destination).map_err(|e| e.to_string())?;
+        remove_dir_tree(destination)?;
     }
     fs::create_dir_all(destination).map_err(|e| e.to_string())?;
 
