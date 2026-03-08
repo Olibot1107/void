@@ -16,6 +16,13 @@ if [[ ! -f "$ROOT_DIR/Cargo.toml" ]]; then
   echo "Expected Cargo.toml at $ROOT_DIR/Cargo.toml" >&2
   exit 1
 fi
+
+# Explicit server mode: `vpm server ...` launches the registry.
+if [[ "${1:-}" == "server" ]]; then
+  shift
+  exec "$ROOT_DIR/bin/void-registry" "$@"
+fi
+
 PROFILE="${VOID_BUILD_PROFILE:-dev}"
 case "$PROFILE" in
   dev|release) ;;

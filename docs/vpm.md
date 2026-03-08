@@ -9,6 +9,14 @@ cd /Users/olie/Desktop/void/package-manager
 
 Default URL: `http://127.0.0.1:4090`
 
+You can also start it with:
+
+```bash
+vpm server
+```
+
+Note: `vpm` only enters server mode when you explicitly use the `server` command.
+
 ## Common commands
 
 ```bash

@@ -24,6 +24,12 @@ cd /Users/olie/Desktop/void/package-manager
 
 Open `http://127.0.0.1:4090`, create an account, login, and publish.
 
+You can also start registry server mode via VPM:
+
+```bash
+vpm server
+```
+
 ## Publish sources
 
 A package can be published from either:
@@ -43,6 +49,7 @@ vpm init
 ```
 
 Running `vpm` with no arguments now opens install-focused help (`install` mode by default).
+Server mode is only used when you explicitly run `vpm server`.
 
 If you use the repo launcher directly, keep it pointed at
 `vpm` so it can find the project root.
