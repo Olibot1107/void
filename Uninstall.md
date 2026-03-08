@@ -21,17 +21,17 @@ bash ./scripts/uninstall/linux.sh
 
 #### Option 3: Force mode (no prompt)
 ```bash
-VOID_UNINSTALL_FORCE=1 curl -sSL https://raw.githubusercontent.com/Olibot1107/void/refs/heads/main/scripts/uninstall/linux.sh | bash
+curl -sSL https://raw.githubusercontent.com/Olibot1107/void/refs/heads/main/scripts/uninstall/linux.sh | VOID_UNINSTALL_FORCE=1 bash
 ```
 
 #### Option 4: Custom install directory
 ```bash
-VOID_INSTALL_DIR=$HOME/my-void-dir curl -sSL https://raw.githubusercontent.com/Olibot1107/void/refs/heads/main/scripts/uninstall/linux.sh | bash
+curl -sSL https://raw.githubusercontent.com/Olibot1107/void/refs/heads/main/scripts/uninstall/linux.sh | VOID_INSTALL_DIR=$HOME/my-void-dir bash
 ```
 
 #### Optional: remove local Hyperdrive output
 ```bash
-VOID_REMOVE_VOID_LAB=1 curl -sSL https://raw.githubusercontent.com/Olibot1107/void/refs/heads/main/scripts/uninstall/linux.sh | bash
+curl -sSL https://raw.githubusercontent.com/Olibot1107/void/refs/heads/main/scripts/uninstall/linux.sh | VOID_REMOVE_VOID_LAB=1 bash
 ```
 
 ---

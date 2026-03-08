@@ -56,7 +56,15 @@ fi
 log_separator
 
 if [[ "${VOID_UNINSTALL_FORCE:-0}" != "1" ]]; then
-    read -r -p "This will remove Void from your machine. Continue? (y/N): " CONFIRM
+    if [[ -r /dev/tty ]]; then
+        read -r -p "This will remove Void from your machine. Continue? (y/N): " CONFIRM < /dev/tty
+    else
+        log_error "No interactive terminal available for confirmation."
+        log_info "Run with force mode instead:"
+        log_info "curl -sSL https://raw.githubusercontent.com/Olibot1107/void/refs/heads/main/scripts/uninstall/linux.sh | VOID_UNINSTALL_FORCE=1 bash"
+        exit 1
+    fi
+
     if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
         log_warning "Uninstall cancelled."
         exit 0
